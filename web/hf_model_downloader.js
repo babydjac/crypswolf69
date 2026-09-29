@@ -463,6 +463,23 @@ function ensureOverlay() {
     overlay.addEventListener("click", (event) => {
         if (event.target === overlay) closeModal();
     });
+    downloadsList.addEventListener("pointerdown", () => {
+        state.jobsPointerDown = true;
+    });
+    window.addEventListener("pointerup", () => {
+        if (!state.jobsPointerDown) return;
+        state.jobsPointerDown = false;
+        if (state.jobsRenderPending) {
+            state.jobsRenderPending = false;
+            setTimeout(renderJobs, 0); // after the click handler has run
+        }
+    });
+    // Keyboard: the popup handles its own keys and keeps them away from the graph
+    // (Delete / Ctrl+A / Space underneath an open dialog is never what you want).
+    modal.tabIndex = -1;
+    overlay.addEventListener("keydown", onOverlayKeydown);
+    overlay.addEventListener("keyup", (event) => event.stopPropagation());
+    overlay.addEventListener("keypress", (event) => event.stopPropagation());
     closeButton.addEventListener("click", () => closeModal());
     settingsButton.addEventListener("click", async () => {
         const next = !state.settingsOpen;
@@ -634,6 +651,60 @@ function ensureOverlay() {
     updateOwnerSourcesUi();
     renderTokenMeta();
     return overlay;
+}
+
+const ROW_SELECTORS = [".hfmd-row", ".hfmd-live-repo", ".hfmd-live-file"];
+
+function focusRow(node) {
+    if (!node) return false;
+    node.focus({ preventScroll: true });
+    node.scrollIntoView({ block: "nearest" });
+    return true;
+}
+
+function onOverlayKeydown(event) {
+    const ui = state.ui;
+    if (!ui) return;
+    const target = event.target;
+    const typing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement;
+    const searchBox = state.view === "live" ? ui.liveSearch : ui.searchInput;
+    let handled = false;
+
+    if (event.key === "Escape") {
+        handled = true;
+        if (state.settingsOpen) setSettingsOpen(false);
+        else if (typing && (target === ui.liveSearch || target === ui.searchInput) && target.value) {
+            target.value = "";
+            target.dispatchEvent(new Event("input"));
+        } else closeModal();
+    } else if (event.key === "/" && !typing) {
+        handled = focusRow(searchBox);
+    } else if (event.key === "ArrowDown" && typing && target === ui.liveSearch) {
+        handled = focusRow(ui.liveRepos.querySelector(".hfmd-live-repo"));
+    } else if (event.key === "ArrowDown" && typing && target === ui.searchInput) {
+        handled = focusRow(ui.list.querySelector(".hfmd-row"));
+    } else if (!typing && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+        const selector = ROW_SELECTORS.find((sel) => target.matches?.(sel));
+        if (selector) {
+            const rows = [...ui.modal.querySelectorAll(selector)].filter((n) => n.offsetParent);
+            const index = rows.indexOf(target);
+            const next = rows[index + (event.key === "ArrowDown" ? 1 : -1)];
+            if (next) handled = focusRow(next);
+            else if (event.key === "ArrowUp" && index === 0) handled = focusRow(searchBox);
+        }
+    } else if (!typing && event.key === "ArrowRight" && target.matches?.(".hfmd-live-repo")) {
+        if (state.live.activeRepo !== target.dataset.repoId) openLiveRepo(target.dataset.repoId);
+        handled = focusRow(ui.liveFiles.querySelector(".hfmd-live-file")) || true;
+    } else if (!typing && event.key === "ArrowLeft" && target.matches?.(".hfmd-live-file")) {
+        handled = focusRow(
+            ui.liveRepos.querySelector(".hfmd-live-repo.is-active") || ui.liveRepos.querySelector(".hfmd-live-repo"),
+        );
+    }
+    if (handled) event.preventDefault();
+    event.stopPropagation();
 }
 
 function setStatus(text, kind = "info") {
@@ -985,14 +1056,25 @@ function renderList() {
             if (isInstalled) subBits.push("already in models dir");
             meta.appendChild(el("div", "hfmd-row-sub", subBits.join(" · ")));
 
-            row.addEventListener("mouseenter", () => {
+            const showDetail = () => {
                 renderDetail(item);
                 for (const other of listEl.querySelectorAll(".hfmd-row.is-focused")) other.classList.remove("is-focused");
                 row.classList.add("is-focused");
-            });
+            };
+            row.tabIndex = 0;
+            checkbox.tabIndex = -1; // the row is the keyboard target
+            row.addEventListener("mouseenter", showDetail);
+            row.addEventListener("focus", showDetail); // keyboard users get details too
             row.addEventListener("click", (event) => {
                 if (isInstalled) return;
                 if (event.target === checkbox) return;
+                checkbox.checked = !checkbox.checked;
+                checkbox.dispatchEvent(new Event("change"));
+            });
+            row.addEventListener("keydown", (event) => {
+                if (event.key !== " " && event.key !== "Enter") return;
+                event.preventDefault();
+                if (isInstalled) return;
                 checkbox.checked = !checkbox.checked;
                 checkbox.dispatchEvent(new Event("change"));
             });
@@ -1010,12 +1092,24 @@ function updateSelectionSummary() {
     if (!state.ui?.selectedInfo) return;
     if (state.view === "live") {
         const repo = state.live.activeRepo || "no repo";
+        const n = state.live.selected.size;
         state.ui.selectedInfo.textContent =
-            `Live: ${state.live.selected.size} selected of ${state.live.files.length} files · ${repo}`;
+            `Live: ${n} selected of ${state.live.files.length} files · ${repo}`;
+        // the toolbar is hidden in Live view, so surface the count on the buttons you'll press
+        const bytes = liveSelectedFiles().reduce((sum, f) => sum + Number(f.size || 0), 0);
+        const label = n ? `Download ${n} selected${bytes ? ` · ${formatBytes(bytes)}` : ""}` : "Select files to download";
+        if (state.ui.liveDownloadButton) {
+            state.ui.liveDownloadButton.textContent = n ? `Download ${n}` : "Download";
+            state.ui.liveDownloadButton.disabled = !n;
+        }
+        if (state.ui.downloadButton) state.ui.downloadButton.textContent = label;
         return;
     }
     const total = state.items.length;
     const selected = state.selectedIds.size;
+    if (state.ui.downloadButton) {
+        state.ui.downloadButton.textContent = selected ? `Download ${selected} selected` : "Download Selected";
+    }
     const visibleItems = currentVisibleItems();
     const visible = visibleItems.length;
     const installedVisible = visibleItems.filter((item) => item.installed).length;
@@ -1091,6 +1185,12 @@ async function fetchIndex(refresh = false) {
 
 function renderJobs() {
     if (!state.ui?.downloadsList) return;
+    // Rebuilding while the pointer is down swaps the Cancel button out from under the
+    // click, so the click never lands. Defer until the pointer is released.
+    if (state.jobsPointerDown) {
+        state.jobsRenderPending = true;
+        return;
+    }
     const root = state.ui.downloadsList;
     root.innerHTML = "";
     if (!state.jobs.length) {
@@ -1247,18 +1347,22 @@ async function pollJobStatus() {
             setStatus(payload.message || `Job ${state.jobId}: cancelled.`, "warn");
             renderBottomProgress(payload);
             stopPolling();
+            state.jobId = null; // finished: lets the jobs poller back off instead of spinning forever
             setTimeout(() => renderBottomProgress(null), 900);
             fetchIndex(false);
         } else if (status === "done") {
             setStatus(payload.message || `Job ${state.jobId}: complete.`, "success");
             renderBottomProgress(payload);
             stopPolling();
+            state.jobId = null;
             setTimeout(() => renderBottomProgress(null), 900);
             fetchIndex(false);
+            if (state.live.activeRepo) openLiveRepo(state.live.activeRepo); // refresh "installed" chips
         } else if (status === "error") {
             setStatus(payload.error || payload.message || `Job ${state.jobId}: failed.`, "error");
             renderBottomProgress(payload);
             stopPolling();
+            state.jobId = null;
             setTimeout(() => renderBottomProgress(null), 1200);
         } else {
             setStatus(`Job ${state.jobId}: ${status}`, "info");
@@ -1391,6 +1495,13 @@ function openModal() {
     if (state.view === "downloads") {
         startJobsPolling();
     }
+    // closing the window stops polling but not the download - pick the progress back up
+    if (state.jobId) startPolling();
+    // keep keyboard focus inside the popup so graph shortcuts can't fire underneath it
+    requestAnimationFrame(() => {
+        const target = state.view === "live" ? state.ui.liveSearch : state.ui.searchInput;
+        (target && target.offsetParent ? target : state.ui.modal)?.focus({ preventScroll: true });
+    });
 }
 
 function closeModal() {
@@ -1577,7 +1688,7 @@ async function installAria2() {
     if (!ui?.liveAria2Button) return;
     ui.liveAria2Button.disabled = true;
     ui.liveAria2Button.textContent = "Installing…";
-    ui.liveAria2Text.textContent = "Running apt-get install aria2. This takes a moment.";
+    ui.liveAria2Text.textContent = "Installing aria2 (Homebrew or apt-get). This can take a minute.";
     try {
         const res = await api.fetchApi("/hf-model-downloader/aria2", { method: "POST" });
         const data = await res.json();
@@ -1597,24 +1708,32 @@ async function installAria2() {
     }
 }
 
-async function runLiveSearch() {
+const LIVE_PAGE = 40;
+const LIVE_MAX = 100; // the backend caps a search at 100 repos
+
+async function runLiveSearch(more = false) {
     const ui = state.ui;
     if (!ui?.liveRepos) return;
+    // Every search gets a ticket; a slower, older response must never overwrite a newer one.
+    const seq = (state.live.seq = (state.live.seq || 0) + 1);
+    state.live.limit = more ? Math.min(LIVE_MAX, (state.live.limit || LIVE_PAGE) + LIVE_PAGE) : LIVE_PAGE;
     state.live.loading = true;
-    ui.liveRepos.replaceChildren(el("div", "hfmd-live-empty", "Searching the Hub…"));
+    if (!more) ui.liveRepos.replaceChildren(el("div", "hfmd-live-empty", "Searching the Hub…"));
 
     const params = new URLSearchParams({
         q: state.live.query || "",
         sort: state.live.sort,
         pipeline: state.live.pipeline,
-        limit: "40",
+        limit: String(state.live.limit),
     });
     try {
         const res = await api.fetchApi(`/hf-model-downloader/search?${params}`);
         const data = await res.json();
+        if (seq !== state.live.seq) return;
         if (!data.ok) throw new Error(data.error || "search failed");
         state.live.results = data.results || [];
     } catch (error) {
+        if (seq !== state.live.seq) return;
         state.live.results = [];
         ui.liveRepos.replaceChildren(
             el("div", "hfmd-live-empty", `Search failed: ${error.message || error}`),
@@ -1640,6 +1759,9 @@ function renderLiveRepos() {
     const frag = document.createDocumentFragment();
     for (const repo of rows) {
         const card = el("div", "hfmd-live-repo");
+        card.tabIndex = 0;
+        card.setAttribute("role", "button");
+        card.dataset.repoId = repo.repo_id;
         if (state.live.activeRepo === repo.repo_id) card.classList.add("is-active");
         card.appendChild(el("div", "hfmd-live-repo-id", repo.repo_id));
         const meta = el("div", "hfmd-live-repo-meta");
@@ -1649,9 +1771,37 @@ function renderLiveRepos() {
         if (repo.gated) meta.appendChild(el("span", "hfmd-chip is-magenta", "gated"));
         card.appendChild(meta);
         card.addEventListener("click", () => openLiveRepo(repo.repo_id));
+        card.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            openLiveRepo(repo.repo_id);
+        });
         frag.appendChild(card);
     }
+    if (rows.length >= (state.live.limit || LIVE_PAGE) && (state.live.limit || LIVE_PAGE) < LIVE_MAX) {
+        const more = el("button", "hfmd-btn hfmd-live-more", "Show more");
+        more.type = "button";
+        more.addEventListener("click", () => {
+            more.disabled = true;
+            more.textContent = "Loading…";
+            runLiveSearch(true);
+        });
+        frag.appendChild(more);
+    }
     ui.liveRepos.replaceChildren(frag);
+    if (!state.live.activeRepo && !ui.liveFiles.childElementCount) {
+        ui.liveFiles.replaceChildren(
+            el("div", "hfmd-live-empty", "Pick a repo on the left to see its files  (↑ ↓ to move, Enter to open)."),
+        );
+    }
+}
+
+function markActiveRepo() {
+    const ui = state.ui;
+    if (!ui?.liveRepos) return;
+    for (const card of ui.liveRepos.querySelectorAll(".hfmd-live-repo")) {
+        card.classList.toggle("is-active", card.dataset.repoId === state.live.activeRepo);
+    }
 }
 
 function formatCount(value) {
@@ -1667,7 +1817,7 @@ async function openLiveRepo(repoId) {
     state.live.activeRepo = repoId;
     state.live.files = [];
     state.live.selected.clear();
-    renderLiveRepos();
+    markActiveRepo(); // toggle classes only: re-rendering the list would drop keyboard focus
     updateSelectionSummary();
     ui.liveFiles.replaceChildren(el("div", "hfmd-live-empty", `Reading ${repoId}…`));
 
@@ -1676,10 +1826,13 @@ async function openLiveRepo(repoId) {
             `/hf-model-downloader/repo?id=${encodeURIComponent(repoId)}`,
         );
         const data = await res.json();
+        // Clicking A then B quickly: A's late answer must not fill B's pane.
+        if (state.live.activeRepo !== repoId) return;
         if (!data.ok) throw new Error(data.error || "could not read repo");
         state.live.files = data.files || [];
         renderLiveFiles(data);
     } catch (error) {
+        if (state.live.activeRepo !== repoId) return;
         ui.liveFiles.replaceChildren(
             el("div", "hfmd-live-empty", `Failed: ${error.message || error}`),
         );
@@ -1702,7 +1855,7 @@ function renderLiveFiles(data) {
     }
 
     const frag = document.createDocumentFragment();
-    const head = el("div", "hfmd-live-bar");
+    const head = el("div", "hfmd-live-bar hfmd-live-files-head");
     head.appendChild(
         el(
             "div",
@@ -1711,32 +1864,61 @@ function renderLiveFiles(data) {
         ),
     );
     const selectAll = el("button", "hfmd-btn", "Select all");
+    selectAll.type = "button";
+    selectAll.title = "Select every file you don't have yet (click again to clear)";
     selectAll.addEventListener("click", () => {
-        const everySelected = files.every((f) => state.live.selected.has(f.id));
-        files.forEach((f) => {
-            if (everySelected) state.live.selected.delete(f.id);
-            else state.live.selected.add(f.id);
-        });
+        // files already on disk are skipped unless they're all you've got
+        const missing = files.filter((f) => !f.installed);
+        const pool = missing.length ? missing : files;
+        const everySelected = pool.every((f) => state.live.selected.has(f.id));
+        state.live.selected.clear();
+        if (!everySelected) pool.forEach((f) => state.live.selected.add(f.id));
         renderLiveFiles(data);
-        updateSelectionSummary();
     });
     head.appendChild(selectAll);
     const openHub = el("button", "hfmd-btn", "Open on HF");
+    openHub.type = "button";
     openHub.addEventListener("click", () => window.open(data.readme_url, "_blank", "noopener"));
     head.appendChild(openHub);
+    const dl = el("button", "hfmd-btn hfmd-live-dl", "Download");
+    dl.type = "button";
+    dl.addEventListener("click", () => startLiveDownload());
+    head.appendChild(dl);
+    state.ui.liveDownloadButton = dl;
     frag.appendChild(head);
 
     for (const file of files) {
         const row = el("div", "hfmd-live-file");
+        row.tabIndex = 0;
+        row.setAttribute("role", "checkbox");
         if (file.installed) row.classList.add("is-installed");
         const box = document.createElement("input");
         box.type = "checkbox";
+        box.tabIndex = -1; // the row is the keyboard target
         box.checked = state.live.selected.has(file.id);
+        const sync = () => {
+            row.classList.toggle("is-selected", box.checked);
+            row.setAttribute("aria-checked", String(box.checked));
+        };
         box.addEventListener("change", () => {
             if (box.checked) state.live.selected.add(file.id);
             else state.live.selected.delete(file.id);
+            sync();
             updateSelectionSummary();
         });
+        const toggle = () => {
+            box.checked = !box.checked;
+            box.dispatchEvent(new Event("change"));
+        };
+        row.addEventListener("click", (event) => {
+            if (event.target !== box) toggle();
+        });
+        row.addEventListener("keydown", (event) => {
+            if (event.key !== " " && event.key !== "Enter") return;
+            event.preventDefault();
+            toggle();
+        });
+        sync();
         row.appendChild(box);
 
         const main = el("div", "hfmd-live-file-main");
@@ -1749,11 +1931,13 @@ function renderLiveFiles(data) {
         }
         if (file.shard) sub.appendChild(el("span", "hfmd-chip is-magenta", "shard"));
         if (file.installed) sub.appendChild(el("span", "hfmd-chip is-green", "installed"));
+        sub.appendChild(el("span", "hfmd-live-dest", `→ ${file.category}/${file.family || "MISC"}/`));
         main.appendChild(sub);
         row.appendChild(main);
         frag.appendChild(row);
     }
     ui.liveFiles.replaceChildren(frag);
+    updateSelectionSummary();
 }
 
 async function startLiveDownload() {
@@ -1768,11 +1952,16 @@ async function startLiveDownload() {
     }
 
     setStatus(`Queueing ${files.length} file(s) from ${state.live.activeRepo}…`, "info");
+    // honour the footer's Concurrent / Connections settings (they were ignored in Live view)
+    const maxConcurrent = Math.max(1, Math.min(32, Number(state.ui.maxConcurrentInput?.value) || 8));
+    const connections = Math.max(1, Math.min(32, Number(state.ui.connectionsInput?.value) || 16));
     try {
         const res = await api.fetchApi("/hf-model-downloader/download", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+                max_concurrent_downloads: maxConcurrent,
+                connections_per_download: connections,
                 items: files.map((f) => ({
                     repo_id: f.repo_id,
                     repo_revision: f.repo_revision,

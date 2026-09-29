@@ -50,7 +50,7 @@
     background: linear-gradient(135deg, #1a1430 0%, #0e0b18 100%);
     color: var(--text-light);
     border-radius: 9999px;
-    box-shadow: var(--hfmd-shadow), 0 12px 28px rgba(224, 122, 95, 0.25);
+    box-shadow: var(--hfmd-shadow), 0 12px 28px rgba(123, 92, 255, 0.28);
     padding: 12px 18px;
     font-weight: 700;
     font-size: 0.9rem;
@@ -64,17 +64,18 @@
 .hfmd-floating-button:hover {
     transform: translateY(-2px);
     border-color: var(--hfmd-violet);
-    box-shadow: var(--hfmd-shadow), 0 16px 32px rgba(244, 195, 139, 0.28);
+    box-shadow: var(--hfmd-shadow), 0 16px 32px rgba(94, 242, 255, 0.22);
 }
 
 .hfmd-overlay {
     position: fixed;
     inset: 0;
-    z-index: 3000;
+    /* above every floating launcher (they sit at 2147483000) */
+    z-index: 2147483300;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(20, 18, 15, 0.95);
+    background: rgba(6, 5, 12, 0.88);
     backdrop-filter: blur(8px);
 }
 
@@ -87,7 +88,7 @@
     border-radius: 24px;
     background: linear-gradient(180deg, #0e0b18 0%, #08060f 100%);
     color: var(--text-light);
-    box-shadow: var(--hfmd-shadow), 0 0 0 1px rgba(244, 195, 139, 0.15) inset;
+    box-shadow: var(--hfmd-shadow), 0 0 0 1px rgba(123, 92, 255, 0.18) inset;
     overflow: hidden;
 }
 
@@ -291,7 +292,7 @@
     overflow: auto;
     border: 1px solid var(--hfmd-edge-soft);
     border-radius: 18px;
-    background: rgba(40, 36, 31, 0.92);
+    background: rgba(14, 11, 24, 0.92);
     padding: 16px;
     box-shadow: var(--hfmd-shadow);
 }
@@ -321,12 +322,12 @@
 .hfmd-row:hover {
     transform: translateY(-5px);
     border-color: var(--hfmd-violet);
-    box-shadow: 15px 15px 30px rgba(224, 122, 95, 0.25);
+    box-shadow: 0 10px 26px rgba(123, 92, 255, 0.28);
 }
 
 .hfmd-row.is-selected {
     border-color: var(--hfmd-cyan);
-    box-shadow: 0 0 0 3px rgba(244, 195, 139, 0.3);
+    box-shadow: 0 0 0 3px rgba(94, 242, 255, 0.28);
 }
 
 .hfmd-row.is-focused {
@@ -589,7 +590,7 @@
 .hfmd-job-file {
     border: 1px solid var(--hfmd-edge-soft);
     border-radius: 14px;
-    background: rgba(31, 27, 22, 0.45);
+    background: rgba(19, 16, 31, 0.6);
     padding: 9px 10px;
     display: grid;
     gap: 6px;
@@ -970,12 +971,50 @@
     font-size: 9px;
 }
 
-.hfmd-modal.hfmd-compact .hfmd-live-chips,
+/* compact keeps the quick-search chips (smaller) - they're the fastest way around */
 .hfmd-modal.hfmd-compact .hfmd-live-hint {
     display: none;
 }
 
-.hfmd-view-toggle.is-active,
+.hfmd-modal.hfmd-compact .hfmd-live-files-head .hfmd-live-hint {
+    display: block;
+}
+
+.hfmd-modal.hfmd-compact .hfmd-chip-button {
+    padding: 3px 9px;
+    font-size: 9px;
+}
+
+.hfmd-modal.hfmd-compact .hfmd-tabs {
+    padding: 6px 12px;
+    gap: 6px;
+}
+
+.hfmd-modal.hfmd-compact .hfmd-tab {
+    padding: 4px 12px;
+    font-size: 11px;
+}
+
+.hfmd-modal.hfmd-compact .hfmd-live-bar {
+    padding: 6px;
+    gap: 6px;
+}
+
+.hfmd-modal.hfmd-compact .hfmd-live-search {
+    padding: 6px 10px;
+}
+
+.hfmd-modal.hfmd-compact .hfmd-live-dest {
+    display: none;
+}
+
+.hfmd-modal.hfmd-compact .hfmd-download {
+    padding: 7px 16px;
+    font-size: 12px;
+}
+
+/* only the density toggle uses the outline style: applying cyan text to the (cyan-filled)
+   active view button made its label invisible */
 .hfmd-density-toggle.is-active {
     border-color: var(--hfmd-cyan);
     color: var(--hfmd-cyan);
@@ -985,4 +1024,110 @@
 .hfmd-modal.hfmd-compact .hfmd-job {
     padding: 6px 8px;
     font-size: 11px;
+}
+
+
+/* ============================================================
+   Navigation & selection polish
+   ============================================================ */
+
+.hfmd-overlay :focus-visible {
+    outline: 2px solid var(--hfmd-cyan);
+    outline-offset: 2px;
+}
+
+.hfmd-modal:focus {
+    outline: none;
+}
+
+.hfmd-row:focus-visible,
+.hfmd-live-repo:focus-visible,
+.hfmd-live-file:focus-visible {
+    outline: 2px solid var(--hfmd-cyan);
+    outline-offset: 1px;
+}
+
+.hfmd-live-file {
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.hfmd-live-file.is-selected {
+    border-color: var(--hfmd-violet);
+    background: #1f1836;
+}
+
+.hfmd-live-files-head {
+    position: sticky;
+    top: -8px;
+    z-index: 1;
+    margin: -8px -8px 2px;
+    border-radius: 10px 10px 0 0;
+}
+
+.hfmd-live-files-head .hfmd-live-hint {
+    flex: 1 1 auto;
+    opacity: 1;
+}
+
+.hfmd-live-dl {
+    background: linear-gradient(90deg, var(--hfmd-violet), var(--hfmd-cyan));
+    color: var(--hfmd-deep);
+    border-color: transparent;
+    font-weight: 800;
+}
+
+.hfmd-live-dl:disabled {
+    opacity: 0.45;
+    cursor: default;
+    transform: none;
+}
+
+.hfmd-live-dest {
+    font: 500 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--text-muted);
+    opacity: 0.8;
+}
+
+.hfmd-live-more {
+    margin: 6px auto 2px;
+    align-self: center;
+}
+
+/* the Live sort / task pickers had no styles at all (native white selects) */
+.hfmd-select {
+    border: 1px solid var(--hfmd-edge-soft);
+    background: #08060f;
+    color: var(--text-light);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font: 600 12px ui-sans-serif, system-ui;
+    outline: none;
+    cursor: pointer;
+}
+
+.hfmd-select:hover,
+.hfmd-select:focus {
+    border-color: var(--hfmd-violet);
+}
+
+.hfmd-select option {
+    background: #13101f;
+    color: var(--text-light);
+}
+
+.hfmd-modal.hfmd-compact .hfmd-select {
+    padding: 5px 8px;
+    font-size: 11px;
+}
+
+/* dark scrollbars everywhere (the live panes fell back to white system scrollbars) */
+.hfmd-list,
+.hfmd-details,
+.hfmd-downloads-list,
+.hfmd-live-repos,
+.hfmd-live-files,
+.hfmd-tabs {
+    scrollbar-color: #32294d transparent;
+    scrollbar-width: thin;
 }

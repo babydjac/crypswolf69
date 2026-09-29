@@ -1,4 +1,4 @@
-"""crypswolfy69 nodes — Alchemist, Prompt Rotate, and HF Model Downloader."""
+"""crypswolfy69 nodes — Alchemist, Prompt Rotate, Model Hub, and HF Model Downloader."""
 
 from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
@@ -11,7 +11,8 @@ from .alchemist.alchemist_node import (
     AlchemistLoraCaption,
     AlchemistPrompt,
 )
-from .hf_downloader import live_browse as _hf_browse  # noqa: F401
+from . import model_hub as _model_hub  # noqa: F401  (Model Hub: Civitai browser + downloader)
+from .hf_downloader import live_browse as _hf_browse  # noqa: F401  (HF Model Downloader)
 from .hf_downloader import server as _hf_server  # noqa: F401
 from .prompt_rotate.prompt_rotate import PromptRotate, PromptRotatePick
 

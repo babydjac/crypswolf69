@@ -387,6 +387,15 @@ def relabel_nonstandard_dirs(parts: Sequence[str]) -> List[str]:
     return remapped
 
 
+TEXT_ENCODER_RE = re.compile(
+    r"t5xxl|umt5|(^|[^a-z0-9])t5([^a-z0-9]|$)|text[_-]?enc|qwen[\d.]*[_-]?vl|qwen[_-]?\d[\d._-]*\d+b(?![a-z])"
+    r"|mmproj|llava|gemma|llama|mistral"
+)
+DIT_FAMILY_RE = re.compile(
+    r"flux|qwen|wan2|wan[-_]?video|hunyuan|z[-_]?image|ltx|cogvideo|krea|minimax|hidream|chroma|lumina|mochi"
+)
+
+
 def categorize_file(repo: Dict[str, object], path: str) -> str:
     lower_path = path.lower()
     parts = relabel_nonstandard_dirs(Path(path).parts[:-1])
@@ -412,8 +421,16 @@ def categorize_file(repo: Dict[str, object], path: str) -> str:
         return "clip"
     if "vae_approx" in lower_path:
         return "vae_approx"
-    if "vae" in lower_path or filename.startswith("ae"):
+    # Flux's autoencoder is shipped as ae.safetensors; plain startswith("ae") also caught
+    # unrelated names like "aesthetic…" or "aeon…".
+    if "vae" in lower_path or re.match(r"^ae([._-])", filename):
         return "vae"
+    if TEXT_ENCODER_RE.search(filename):
+        return "text_encoders"
+    if filename.endswith(".gguf"):
+        # GGUF only loads through ComfyUI-GGUF (diffusion models from diffusion_models/unet);
+        # no checkpoint loader can read it.
+        return "diffusion_models"
     if "ip_adapter" in lower_path or "patch" in lower_path:
         return "model_patches"
     if "embedding" in lower_path:
@@ -428,6 +445,12 @@ def categorize_file(repo: Dict[str, object], path: str) -> str:
         return "audio_encoders"
     if "unet" in lower_path:
         return "unet"
+    # DiT-family weights (Flux, Qwen-Image, Wan, Krea…) go to diffusion_models even when the
+    # repo is tagged comfyui/diffusion-single-file: those tags are on diffusion-only repos too
+    # (Kijai/WanVideo_comfy), and Load Diffusion Model reads diffusion-only files *and* full
+    # checkpoints, whereas Load Checkpoint rejects diffusion-only files outright.
+    if DIT_FAMILY_RE.search(f"{repo.get('id', '')}/{path}".lower()):
+        return "diffusion_models"
     if "diffusion-single-file" in tags or "comfyui" in tags:
         return "checkpoints"
     if "diffusers" in tags:
@@ -822,6 +845,28 @@ def get_tab_order(items: Sequence[Dict[str, object]]) -> List[str]:
     return ordered + extras
 
 
+_EXTRA_BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/snap/bin")
+
+
+def find_executable(name: str) -> Optional[str]:
+    """shutil.which, plus the usual Homebrew/system dirs - ComfyUI started from a
+    GUI or launchd often has a PATH without /opt/homebrew/bin."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for directory in _EXTRA_BIN_DIRS:
+        candidate = os.path.join(directory, name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def sanitize_folder_name(name: str, default: str = "MISC") -> str:
+    """One safe path component: no separators, no '..', no control characters."""
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(name or "")).strip(" .")
+    return cleaned[:80] or default
+
+
 def sanitize_filename(name: str) -> str:
     cleaned = re.sub(r'[<>:"/\\\\|?*]+', "_", name).strip()
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
@@ -1168,6 +1213,27 @@ def _aria2_rpc_call(rpc_url: str, secret: str, method: str, params: List[object]
     return decoded.get("result") if isinstance(decoded, dict) else None
 
 
+def _shutdown_aria2(process: "subprocess.Popen", rpc_url: str, secret: str) -> None:
+    """Ask aria2 to exit over RPC; fall back to terminate/kill if it doesn't."""
+    try:
+        _aria2_rpc_call(rpc_url, secret, "shutdown", [])
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        process.wait(timeout=10)
+        return
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+    except Exception:  # noqa: BLE001
+        try:
+            process.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _poll_aria2_items(rpc_url: str, secret: str) -> List[Dict[str, object]]:
     keys = ["gid", "status", "totalLength", "completedLength", "downloadSpeed", "files", "errorMessage"]
     active = _aria2_rpc_call(rpc_url, secret, "tellActive", [keys]) or []
@@ -1312,9 +1378,9 @@ def _run_download_worker(
                 raise RuntimeError(f"HF token invalid/expired: {detail}")
             _append_job_log(job_id, f"Token check: {detail}")
 
-        aria2 = shutil.which("aria2c")
+        aria2 = find_executable("aria2c")
         if not aria2:
-            raise RuntimeError("aria2c not found in PATH. Install aria2 to download models.")
+            raise RuntimeError("aria2c not found. Install aria2 (macOS: brew install aria2) to download models.")
 
         queue_file, targets = _create_aria2_queue(items, token)
         file_entries = _build_file_progress_entries(items, targets)
@@ -1359,6 +1425,7 @@ def _run_download_worker(
         )
         _set_job_process(job_id, process)
         rpc_failed_logged = False
+        aria2_stopped_by_us = False
         while True:
             downloaded_bytes = 0
             completed = 0
@@ -1410,6 +1477,9 @@ def _run_download_worker(
                 progress = min(100.0, (downloaded_bytes / total_bytes) * 100.0)
             else:
                 progress = min(100.0, (completed / max(1, len(items))) * 100.0)
+            progress_fields = {}
+            if not _is_cancel_requested(job_id):  # keep "Cancelling download..." visible
+                progress_fields["message"] = f"Downloading… {completed}/{len(items)} file(s) finished."
             _set_job(
                 job_id,
                 completed=completed,
@@ -1417,12 +1487,27 @@ def _run_download_worker(
                 total_bytes=total_bytes,
                 progress=progress,
                 files=file_entries,
+                **progress_fields,
             )
+            # With --enable-rpc aria2 keeps running after its queue drains, so waiting for
+            # the process to exit hung every job at "running" and leaked an aria2c process.
+            # Detect the drained queue ourselves and ask aria2 to shut down.
+            if process.poll() is None and not _is_cancel_requested(job_id):
+                if rpc_used:
+                    states = [str(info.get("status", "")) for info in aria2_items]
+                    queue_done = len(states) >= len(items) and all(
+                        state in ("complete", "error", "removed") for state in states
+                    )
+                else:
+                    queue_done = all(entry.get("status") == "complete" for entry in file_entries)
+                if queue_done:
+                    _shutdown_aria2(process, rpc_url, rpc_secret)
+                    aria2_stopped_by_us = True
             if process.poll() is not None:
                 break
             time.sleep(0.6)
 
-        if process.returncode != 0:
+        if process.returncode != 0 and not aria2_stopped_by_us:
             if _is_cancel_requested(job_id):
                 raise RuntimeError("cancelled")
             raise RuntimeError(f"aria2 exited with code {process.returncode}")
@@ -1771,7 +1856,9 @@ def normalize_live_items(rows: Sequence[object]) -> List[Dict[str, object]]:
                 "filename": Path(path).name,
                 "size": size,
                 "category": category,
-                "family": str(row.get("family") or "MISC"),
+                # family becomes a directory name (models/<category>/<family>/); it comes
+                # from the browser, so it must never be able to contain '..' or a separator
+                "family": sanitize_folder_name(row.get("family") or "MISC"),
                 "title": str(row.get("title") or Path(path).name),
             }
         )

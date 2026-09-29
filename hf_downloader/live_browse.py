@@ -209,22 +209,26 @@ async def repo_files(repo_id: str) -> Dict[str, object]:
     if not repo_id or repo_id.count("/") != 1:
         raise ValueError("Need a repo id shaped like owner/name.")
 
-    hit = _cached(_TREE_CACHE, repo_id, TREE_CACHE_TTL)
-    if hit is not None:
-        return hit
+    # Only the remote file tree is cached. "installed" is recomputed on every call,
+    # otherwise a file you just downloaded kept showing as missing for 5 minutes.
+    base = _cached(_TREE_CACHE, repo_id, TREE_CACHE_TTL)
+    if base is None:
+        timeout = aiohttp.ClientTimeout(total=40)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            info = await core.request_json(
+                session, f"{core.HF_API}/models/{quote(repo_id, safe='/')}", timeout=30
+            )
+            if not isinstance(info, dict):
+                raise ValueError(f"Repo not found: {repo_id}")
+            revision = core._repo_tree_revision(info)
+            tree = await core.fetch_repo_tree(session, repo_id, revision)
+        tree_files = [f for f in (_model_file(info, e) for e in (tree or [])) if f]
+        tree_files.sort(key=lambda f: (-f["size"], f["path"]))
+        base = {"repo": _repo_row(info), "revision": revision, "files": tree_files}
+        _store(_TREE_CACHE, repo_id, base)
 
-    timeout = aiohttp.ClientTimeout(total=40)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        info = await core.request_json(
-            session, f"{core.HF_API}/models/{quote(repo_id, safe='/')}", timeout=30
-        )
-        if not isinstance(info, dict):
-            raise ValueError(f"Repo not found: {repo_id}")
-        revision = core._repo_tree_revision(info)
-        tree = await core.fetch_repo_tree(session, repo_id, revision)
-
-    files = [f for f in (_model_file(info, e) for e in (tree or [])) if f]
-    files.sort(key=lambda f: (-f["size"], f["path"]))
+    revision = base["revision"]
+    files = [dict(f) for f in base["files"]]
 
     installed = core.build_installed_lookup(files)
     for row in files:
@@ -239,8 +243,8 @@ async def repo_files(repo_id: str) -> Dict[str, object]:
     for row in files:
         by_category[row["category"]] = by_category.get(row["category"], 0) + 1
 
-    result = {
-        "repo": _repo_row(info),
+    return {
+        "repo": base["repo"],
         "revision": revision,
         "files": files,
         "file_count": len(files),
@@ -248,12 +252,10 @@ async def repo_files(repo_id: str) -> Dict[str, object]:
         "categories": sorted(by_category.items(), key=lambda kv: (-kv[1], kv[0])),
         "readme_url": f"{core.HF_WEB}/{repo_id}",
     }
-    _store(_TREE_CACHE, repo_id, result)
-    return result
 
 
 def aria2_state() -> Dict[str, object]:
-    path = shutil.which("aria2c")
+    path = core.find_executable("aria2c")
     version = ""
     if path:
         try:
@@ -267,13 +269,28 @@ def aria2_state() -> Dict[str, object]:
 
 
 def install_aria2() -> Dict[str, object]:
-    """apt-get install aria2, skipping third-party lists that often break update."""
+    """Install aria2 with Homebrew (macOS) or apt-get (Debian/Ubuntu images)."""
     state = aria2_state()
     if state["installed"]:
         return {"ok": True, "already": True, **state}
 
+    brew = core.find_executable("brew")
+    if brew:
+        env = {**core.os.environ, "HOMEBREW_NO_AUTO_UPDATE": "1", "HOMEBREW_NO_INSTALL_CLEANUP": "1",
+               "HOMEBREW_NO_ENV_HINTS": "1"}
+        proc = subprocess.run([brew, "install", "aria2"], capture_output=True, text=True,
+                              timeout=900, check=False, env=env)
+        logs = [f"brew install aria2 -> {proc.returncode}"]
+        state = aria2_state()
+        if state["installed"]:
+            return {"ok": True, "already": False, "logs": logs, **state}
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-6:]
+        return {"ok": False, "error": "brew install finished but aria2c is still missing", "logs": logs + tail}
+
     if not shutil.which("apt-get"):
-        return {"ok": False, "error": "apt-get not available on this image."}
+        return {"ok": False, "error": "No supported package manager found. Install aria2 yourself: "
+                                      "macOS `brew install aria2`, Windows `winget install aria2.aria2`, "
+                                      "Linux via your package manager."}
 
     env = {**core.os.environ, "DEBIAN_FRONTEND": "noninteractive"}
     logs: List[str] = []

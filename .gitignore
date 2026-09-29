@@ -18,3 +18,6 @@ build/
 node_modules/
 
 node.zip
+
+# Model Hub runtime config (tokens etc.)
+model_hub/config.json
