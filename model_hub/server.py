@@ -208,14 +208,6 @@ def known_folders():
     return out
 
 
-def folder_for(target):
-    folders = known_folders()
-    if target in folders:
-        return folders[target]
-    base = _models_dir() or os.path.join(HERE, "downloads")
-    return os.path.join(base, target or "checkpoints")
-
-
 def _rel(path):
     base = _models_dir()
     try:
@@ -467,6 +459,7 @@ async def _segmented(sess, dl, total, chunk_size, connections):
     if not done:
         with open(dl.part, "wb") as f:
             f.truncate(total)
+        _save_sidecar(dl, total, chunk_size, done)
     dl.done = sum(chunks[i][1] - chunks[i][0] + 1 for i in done)
     dl._last_b = dl.done
     q = asyncio.Queue()
@@ -541,6 +534,12 @@ async def _segmented(sess, dl, total, chunk_size, connections):
 
 
 async def _single_once(sess, dl):
+    if os.path.exists(dl.sidecar):
+        # a segmented attempt pre-sized .part to the full length; its size says nothing
+        # about what was actually written, so it can't be resumed as a single stream
+        _clean_sidecar(dl)
+        if os.path.exists(dl.part):
+            os.remove(dl.part)
     start = os.path.getsize(dl.part) if os.path.exists(dl.part) else 0
     if dl.total and start == dl.total:
         dl.done = start
@@ -958,8 +957,11 @@ async def r_download(req):
         return _json({"error": str(e) or e.__class__.__name__}, status=400)
     if not name:
         return _json({"error": "could not work out a file name for that link"}, status=400)
-    target = body.get("target") or default_target(model_type, base, name)
-    folder = folder_for(target)
+    target = str(body.get("target") or "") or default_target(model_type, base, name)
+    # target comes from the browser: only ever resolve it through the known folder map
+    folder = known_folders().get(target)
+    if not folder:
+        return _json({"error": f"unknown target folder: {target}"}, status=400)
     if cfg.get("organize_by_base", True):
         sub = safe_folder(base)
         if sub:
