@@ -268,53 +268,70 @@ def aria2_state() -> Dict[str, object]:
     return {"installed": bool(path), "path": path or "", "version": version}
 
 
+def _install_plans() -> List[tuple]:
+    """(name, [commands], extra_env) for every package manager found on this machine."""
+    plans: List[tuple] = []
+    brew = core.find_executable("brew")
+    if brew:
+        plans.append(("Homebrew", [[brew, "install", "aria2"]],
+                      {"HOMEBREW_NO_AUTO_UPDATE": "1", "HOMEBREW_NO_INSTALL_CLEANUP": "1",
+                       "HOMEBREW_NO_ENV_HINTS": "1"}))
+    winget = shutil.which("winget")
+    if winget:
+        plans.append(("winget", [[winget, "install", "--id", "aria2.aria2", "-e", "--silent",
+                                  "--accept-source-agreements", "--accept-package-agreements"]], {}))
+    choco = shutil.which("choco")
+    if choco:
+        plans.append(("Chocolatey", [[choco, "install", "aria2", "-y"]], {}))
+    scoop = shutil.which("scoop") or shutil.which("scoop.cmd")
+    if scoop:
+        plans.append(("Scoop", [[scoop, "install", "aria2"]], {}))
+    apt = shutil.which("apt-get")
+    if apt:
+        plans.append(("apt-get", [
+            # skip third-party lists that often break `apt-get update` in containers
+            [apt, "update", "-o", "Dir::Etc::sourcelist=sources.list",
+             "-o", "Dir::Etc::sourceparts=-", "-o", "APT::Get::List-Cleanup=0"],
+            [apt, "install", "-y", "aria2"],
+        ], {"DEBIAN_FRONTEND": "noninteractive"}))
+    for pm, cmd in (("dnf", ["install", "-y", "aria2"]), ("yum", ["install", "-y", "aria2"]),
+                    ("pacman", ["-S", "--noconfirm", "aria2"]), ("apk", ["add", "--no-cache", "aria2"])):
+        found = shutil.which(pm)
+        if found:
+            plans.append((pm, [[found, *cmd]], {}))
+    return plans
+
+
 def install_aria2() -> Dict[str, object]:
-    """Install aria2 with Homebrew (macOS) or apt-get (Debian/Ubuntu images)."""
+    """Install aria2 with whatever package manager this machine has
+    (Homebrew, winget, Chocolatey, Scoop, apt-get, dnf/yum, pacman or apk)."""
     state = aria2_state()
     if state["installed"]:
         return {"ok": True, "already": True, **state}
 
-    brew = core.find_executable("brew")
-    if brew:
-        env = {**core.os.environ, "HOMEBREW_NO_AUTO_UPDATE": "1", "HOMEBREW_NO_INSTALL_CLEANUP": "1",
-               "HOMEBREW_NO_ENV_HINTS": "1"}
-        proc = subprocess.run([brew, "install", "aria2"], capture_output=True, text=True,
-                              timeout=900, check=False, env=env)
-        logs = [f"brew install aria2 -> {proc.returncode}"]
-        state = aria2_state()
-        if state["installed"]:
-            return {"ok": True, "already": False, "logs": logs, **state}
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-6:]
-        return {"ok": False, "error": "brew install finished but aria2c is still missing", "logs": logs + tail}
-
-    if not shutil.which("apt-get"):
+    plans = _install_plans()
+    if not plans:
         return {"ok": False, "error": "No supported package manager found. Install aria2 yourself: "
                                       "macOS `brew install aria2`, Windows `winget install aria2.aria2`, "
                                       "Linux via your package manager."}
-
-    env = {**core.os.environ, "DEBIAN_FRONTEND": "noninteractive"}
     logs: List[str] = []
-    update = subprocess.run(
-        [
-            "apt-get", "update",
-            "-o", "Dir::Etc::sourcelist=sources.list",
-            "-o", "Dir::Etc::sourceparts=-",
-            "-o", "APT::Get::List-Cleanup=0",
-        ],
-        capture_output=True, text=True, timeout=300, check=False, env=env,
-    )
-    logs.append(f"apt-get update -> {update.returncode}")
-    install = subprocess.run(
-        ["apt-get", "install", "-y", "aria2"],
-        capture_output=True, text=True, timeout=600, check=False, env=env,
-    )
-    logs.append(f"apt-get install aria2 -> {install.returncode}")
-
-    state = aria2_state()
-    if state["installed"]:
-        return {"ok": True, "already": False, "logs": logs, **state}
-    tail = (install.stderr or install.stdout or "").strip().splitlines()[-6:]
-    return {"ok": False, "error": "install finished but aria2c is still missing", "logs": logs + tail}
+    tail: List[str] = []
+    for name, commands, extra_env in plans:
+        env = {**core.os.environ, **extra_env}
+        for cmd in commands:
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900,
+                                      check=False, env=env)
+                logs.append(f"{name}: {Path(cmd[0]).name} {' '.join(cmd[1:3])} -> {proc.returncode}")
+                tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-6:]
+            except Exception as exc:  # noqa: BLE001
+                logs.append(f"{name}: {exc}")
+        state = aria2_state()
+        if state["installed"]:
+            return {"ok": True, "already": False, "via": name, "logs": logs, **state}
+    return {"ok": False, "error": "the install finished but aria2c still isn't available "
+                                  "(it may need admin rights, or a ComfyUI restart to appear on PATH)",
+            "logs": logs + tail}
 
 
 def register_routes() -> None:

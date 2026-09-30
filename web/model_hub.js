@@ -5,8 +5,9 @@ import { api } from "../../scripts/api.js";
  * ComfyUI Model Hub
  *   - Civitai browser: thumbnails/video previews, filters, detail + lightbox,
  *     fast resumable downloads that land in the right models/ folder.
- *   - "Hugging Face" opens the HF Model Downloader window when installed
- *     (falls back to a built-in repo/file browser otherwise).
+ *   - "Hugging Face" tab: the HF Model Downloader panel mounted inside the hub
+ *     (a small built-in repo/file browser is the fallback if it isn't loaded).
+ *   - aria2 status + one-click install in the header (aria2 runs the HF downloads).
  *
  * Security note: every piece of text that comes from Civitai/HF is written
  * with textContent. innerHTML is only used for the static icon markup below.
@@ -298,6 +299,23 @@ const STYLE = `
 .mh-hfmeta{margin-top:4px;font-size:10.5px;color:#b6ac86}
 .mh-hffile{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;background:#1a1710}
 .mh-hffile .mh-fname{color:#f6efd6}
+/* Hugging Face tab (embedded HF Model Downloader) */
+.mh-hfhost{display:none;flex:1;min-height:0;overflow:hidden}
+.mh-root.hfmode .mh-hfhost{display:flex;flex-direction:column}
+.mh-root.hfmode .mh-body,.mh-root.hfmode .mh-filters,.mh-root.hfmode .mh-search{display:none}
+.mh-root.hfmode .mh-tabs{margin-right:auto}
+/* aria2 status / installer */
+.mh-aria{flex:none;height:36px;display:none;align-items:center;gap:6px;padding:0 12px;border-radius:10px;border:1px solid var(--line);
+  background:rgba(255,255,255,.045);color:var(--mut);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:.15s}
+.mh-aria.on{display:inline-flex}
+.mh-aria:hover{border-color:var(--line2);color:var(--txt)}
+.mh-aria.ok{color:var(--ok);border-color:rgba(52,211,153,.35)}
+.mh-aria.miss{color:#1c1300;background:linear-gradient(135deg,#fbbf24,#f59e0b);border-color:transparent}
+.mh-aria.miss:hover{filter:brightness(1.08);color:#1c1300}
+.mh-aria.bad{color:var(--bad);border-color:rgba(248,113,113,.5)}
+.mh-aria.busy{cursor:progress;opacity:.8}
+.mh-spin{width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:mhSpin .7s linear infinite}
+@keyframes mhSpin{to{transform:rotate(360deg)}}
 /* sidebar tab */
 .mh-side{padding:14px;display:flex;flex-direction:column;gap:10px}
 .mh-side .mh-btn{width:100%}
@@ -324,7 +342,8 @@ class ModelHub {
       source: "civitai", types: "", base: "", sort: "Highest Rated", period: "AllTime",
       nsfw: false, density: "comfy", ...p,
     };
-    if (this.prefs.source !== "civitai" && this.prefs.source !== "hf-fallback") this.prefs.source = "civitai";
+    if (!["civitai", "huggingface", "hf-fallback"].includes(this.prefs.source)) this.prefs.source = "civitai";
+    this.aria2 = null; this._ariaBusy = false; this._hfMounted = false;
     this.q = "";
     this.cursor = null; this.hasMore = true; this.busy = false; this.count = 0; this.gen = 0;
     this.owned = new Set();
@@ -343,6 +362,7 @@ class ModelHub {
     try { this.cfg = await call("/model_hub/config"); } catch { this.cfg = null; }
     this._renderFilters();
     this.refreshOwned();
+    this.refreshAria2();
     this.poll();
   }
 
@@ -377,9 +397,9 @@ class ModelHub {
     this.tabCiv = el("button", "mh-tab", "Civitai"); this.tabCiv.type = "button";
     this.tabHf = el("button", "mh-tab"); this.tabHf.type = "button";
     this.tabHf.append(el("span", null, "Hugging Face"));
-    this.tabHf.title = "Opens the Hugging Face model downloader";
+    this.tabHf.title = "Hugging Face  (Ctrl/Cmd+Shift+B)";
     this.tabCiv.onclick = () => this.setSource("civitai");
-    this.tabHf.onclick = () => this.openHF();
+    this.tabHf.onclick = () => this.setSource("huggingface");
     tabs.append(this.tabCiv, this.tabHf);
     const search = el("div", "mh-search");
     this.input = el("input"); this.input.type = "text"; this.input.placeholder = "Search models…"; this.input.setAttribute("aria-label", "Search");
@@ -392,7 +412,10 @@ class ModelHub {
     this.dlBtn = iconBtn("download", "Downloads"); this.dlBtn.onclick = () => this.toggleDrawer();
     const setBtn = iconBtn("gear", "Settings"); setBtn.onclick = () => this.openSettings();
     const xBtn = iconBtn("x", "Close (Esc)"); xBtn.onclick = () => this.close();
-    head.append(logo, tabs, search, this.dlBtn, setBtn, xBtn);
+    // aria2 status / one-click installer (aria2 powers the Hugging Face downloads)
+    this.ariaBtn = el("button", "mh-aria"); this.ariaBtn.type = "button";
+    this.ariaBtn.onclick = () => (this.aria2 && this.aria2.installed ? this.refreshAria2(true) : this.installAria2());
+    head.append(logo, tabs, search, this.ariaBtn, this.dlBtn, setBtn, xBtn);
 
     this.fbar = el("div", "mh-filters");
 
@@ -421,7 +444,9 @@ class ModelHub {
     this.lb = el("div", "mh-lb");
     this.toasts = el("div", "mh-toasts");
 
-    panel.append(head, this.fbar, this.body, this.drawer, this.modal, this.lb, this.toasts);
+    // Hugging Face tab: the HF Model Downloader panel gets mounted in here
+    this.hfHost = el("div", "mh-hfhost");
+    panel.append(head, this.fbar, this.body, this.hfHost, this.drawer, this.modal, this.lb, this.toasts);
     panel.addEventListener("mousedown", (e) => {
       if (this.drawer.classList.contains("open") && !this.drawer.contains(e.target) && !this.dlBtn.contains(e.target)) this.closeDrawer();
     });
@@ -442,7 +467,13 @@ class ModelHub {
   _keys(e) {
     // Alt/Option+M (on a Mac, Option+M types "µ", so check the physical key too)
     if (e.altKey && !e.ctrlKey && !e.metaKey && (e.code === "KeyM" || /^[mMµ]$/.test(e.key))) { e.preventDefault(); e.stopPropagation(); this.toggle(); return; }
+    // Ctrl/Cmd+Shift+B: straight to the Hugging Face tab (the old HF downloader shortcut)
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.code === "KeyB" || e.key === "b" || e.key === "B")) { e.preventDefault(); e.stopPropagation(); this.openHF(); return; }
     if (!this.isOpen()) return;
+    // Inside the Hugging Face tab the embedded downloader handles its own keys (Esc, /,
+    // arrows) - unless one of the hub's own layers (settings, drawer, lightbox) is on top.
+    if (this._hfMounted && this.hfHost.contains(e.target) && !this.modal.classList.contains("open") &&
+      !this.drawer.classList.contains("open") && !this.lb.classList.contains("open")) return;
     const ae = document.activeElement;
     const typing = !!ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
     const handled = () => { e.preventDefault(); e.stopPropagation(); };
@@ -466,7 +497,13 @@ class ModelHub {
       else if (e.key === "ArrowRight") { handled(); this._stageStep(1); }
       return;
     }
-    if (e.key === "/") { handled(); this.input.focus(); this.input.select(); }
+    if (e.key === "/") {
+      handled();
+      if (this._hfMounted) {
+        const box = [...this.hfHost.querySelectorAll(".hfmd-live-search, .hfmd-search")].find((n) => n.offsetParent);
+        if (box) box.focus();
+      } else { this.input.focus(); this.input.select(); }
+    }
   }
 
   _draggable(node) {
@@ -496,27 +533,64 @@ class ModelHub {
   toggle() { this.isOpen() ? this.close() : this.open(); }
   open() {
     this.overlay.classList.add("open");
-    if (!this.grid.children.length && !this.busy) this.reload();
-    this.refreshOwned(); this.poll();
-    setTimeout(() => this.input.focus(), 30);
+    this._applySource();
+    this.refreshOwned(); this.poll(); this.refreshAria2();
+    if (!this._hfMounted) setTimeout(() => this.input.focus(), 30);
   }
-  close() { this.overlay.classList.remove("open"); this.closeLightbox(); this._stopMedia(this.panel); }
+  close() {
+    this._unmountHF();
+    this.overlay.classList.remove("open"); this.closeLightbox(); this._stopMedia(this.panel);
+  }
+
+  _hfApi() { const a = window.hfModelDownloader; return a && typeof a.mount === "function" ? a : null; }
 
   openHF() {
-    if (typeof window.openHFModelDownloader === "function") {
-      this.close();
-      window.openHFModelDownloader();
-    } else {
-      this.setSource("hf-fallback");
-    }
+    this.prefs.source = this._hfApi() ? "huggingface" : "hf-fallback"; this._save();
+    if (this.isOpen()) this._applySource(); else this.open();
   }
 
   setSource(s) {
+    if (s === "huggingface" && !this._hfApi()) s = "hf-fallback";
     this.prefs.source = s; this._save();
-    this._syncTabs(); this._renderFilters(); this.reload();
+    this._applySource();
   }
+
+  // show the right tab: the Civitai grid, the embedded HF downloader, or the HF fallback pane
+  _applySource() {
+    const s = this.prefs.source;
+    const hf = s === "huggingface" && !!this._hfApi();
+    this.root.classList.toggle("hfmode", hf);
+    this._syncTabs();
+    if (hf) {
+      this._stopMedia(this.grid);
+      if (this.isOpen()) this._mountHF();
+      return;
+    }
+    this._unmountHF();
+    this._renderFilters();
+    if (s === "hf-fallback" || !this.grid.children.length) this.reload();
+  }
+
+  _mountHF() {
+    const api = this._hfApi();
+    if (!api || this._hfMounted) return;
+    this._hfMounted = true;
+    try { api.mount(this.hfHost, { onClose: () => this.close() }); }
+    catch (e) {
+      this._hfMounted = false;
+      console.error("[ModelHub] Hugging Face tab failed", e);
+      this.toast("The Hugging Face tab failed to load: " + e.message, "bad");
+    }
+  }
+
+  _unmountHF() {
+    const api = this._hfApi();
+    if (api && this._hfMounted) { try { api.unmount(); } catch { /* already gone */ } }
+    this._hfMounted = false;
+  }
+
   _syncTabs() {
-    const hf = this.prefs.source === "hf-fallback";
+    const hf = this.prefs.source !== "civitai";
     this.tabCiv.classList.toggle("active", !hf); this.tabHf.classList.toggle("active", hf);
     this.tabCiv.setAttribute("aria-selected", String(!hf)); this.tabHf.setAttribute("aria-selected", String(hf));
   }
@@ -1027,6 +1101,24 @@ class ModelHub {
     const chk = el("label", "mh-check"); const cb = el("input"); cb.type = "checkbox"; cb.checked = cfg.organize_by_base !== false;
     const txt = el("div"); txt.append(el("div", null, "Sort downloads into base-model folders"), el("div", "mh-hint", "e.g. loras/Krea 2/…  and  loras/MiniMax H3/…  so same-type files for different models never mix."));
     chk.append(cb, txt); form.appendChild(chk);
+    // aria2 (Hugging Face downloads)
+    const ar = el("div", "mh-field");
+    const al = el("label"); al.appendChild(el("span", null, "aria2 — used for Hugging Face downloads")); ar.appendChild(al);
+    const arow = el("div", "mh-row");
+    const astat = el("span", "mh-hint"); astat.style.flex = "1";
+    const abtn = el("button", "mh-btn ghost"); abtn.type = "button";
+    const syncAria = () => {
+      const a = this.aria2;
+      if (!a) { astat.textContent = "The Hugging Face downloader isn't loaded."; abtn.style.display = "none"; return; }
+      abtn.style.display = "";
+      if (this._ariaBusy) { astat.textContent = "Installing…"; abtn.disabled = true; abtn.textContent = "Installing…"; return; }
+      abtn.disabled = false;
+      if (a.installed) { astat.textContent = "Installed — " + (a.version || a.path); abtn.textContent = "Check again"; abtn.onclick = () => this.refreshAria2(true); }
+      else { astat.textContent = a.error ? "Not installed — last attempt: " + a.error : "Not installed"; abtn.textContent = "Install aria2"; abtn.onclick = () => this.installAria2(); }
+    };
+    this._settingsAria = () => { if (abtn.isConnected) syncAria(); else this._settingsAria = null; };
+    syncAria();
+    arow.append(astat, abtn); ar.appendChild(arow); form.appendChild(ar);
     const acts = el("div", "mh-actions");
     const cancel = el("button", "mh-btn ghost", "Cancel"); cancel.type = "button"; cancel.onclick = () => this.closeModal();
     const save = el("button", "mh-btn", "Save"); save.type = "button";
@@ -1216,6 +1308,54 @@ class ModelHub {
     });
   }
 
+  // ------------------------------------------------------------------ aria2
+  _renderAria2() {
+    const b = this.ariaBtn; if (!b) return;
+    const a = this.aria2;
+    b.className = "mh-aria"; b.textContent = ""; b.disabled = false;
+    if (!a) return;                               // HF downloader not installed: nothing to show
+    b.classList.add("on");
+    if (this._ariaBusy) {
+      b.classList.add("busy"); b.disabled = true;
+      b.append(el("span", "mh-spin"), el("span", null, "Installing aria2…"));
+      b.title = "Installing aria2 – this can take a minute"; return;
+    }
+    if (a.installed) {
+      b.classList.add("ok"); b.append(icon("check", 13), el("span", null, "aria2"));
+      b.title = `${a.version || "aria2"}${a.path ? "\n" + a.path : ""}\nUsed for Hugging Face downloads – click to re-check`; return;
+    }
+    b.classList.add(a.error ? "bad" : "miss");
+    b.append(icon("download", 13), el("span", null, a.error ? "Retry aria2 install" : "Install aria2"));
+    b.title = a.error ? "Last attempt failed: " + a.error : "aria2 is needed for Hugging Face downloads – click to install it";
+  }
+
+  async refreshAria2(announce) {
+    try {
+      const r = await call("/hf-model-downloader/aria2");
+      this.aria2 = { installed: !!r.installed, version: r.version || "", path: r.path || "" };
+      if (announce) this.toast(r.installed ? `aria2 is installed (${r.version || r.path})` : "aria2 is not installed", r.installed ? "ok" : "bad");
+    } catch { this.aria2 = null; }                // no route: the HF downloader isn't loaded
+    this._renderAria2(); if (this._settingsAria) this._settingsAria();
+  }
+
+  async installAria2() {
+    if (this._ariaBusy) return;
+    this._ariaBusy = true; this._renderAria2(); if (this._settingsAria) this._settingsAria();
+    this.toast("Installing aria2… this can take a minute", "ok");
+    let r;
+    try { r = await call("/hf-model-downloader/aria2", {}); } catch (e) { r = { ok: false, error: e.message }; }
+    this._ariaBusy = false;
+    if (r.ok) {
+      this.aria2 = { installed: true, version: r.version || "", path: r.path || "" };
+      this.toast(`aria2 ready${r.version ? " — " + r.version : ""}${r.via ? " (via " + r.via + ")" : ""}`, "ok");
+    } else {
+      this.aria2 = { installed: false, error: r.error || "install failed" };
+      this.toast("aria2 install failed: " + (r.error || "unknown error"), "bad");
+    }
+    this._renderAria2(); if (this._settingsAria) this._settingsAria();
+    try { window.hfModelDownloader?.checkAria2?.(); } catch { /* HF panel not loaded */ }
+  }
+
   // ----------------------------------------------------------- sidebar tab
   renderSidebar(node) { this.sidePanel = node; this._renderSide(); }
   _renderSide() {
@@ -1224,8 +1364,8 @@ class ModelHub {
     const w = el("div", "mh-root"); const s = el("div", "mh-side");
     const logo = el("div", "mh-logo"); logo.append(icon("hub", 18), el("span", null, "MODEL HUB"));
     s.append(logo, el("div", "mh-hint", "Browse Civitai and Hugging Face and download straight into the right models/ folder."));
-    const o = el("button", "mh-btn", "Open Civitai browser  (Alt+M)"); o.type = "button"; o.onclick = () => { this.setSource("civitai"); this.open(); };
-    const h = el("button", "mh-btn ghost", "Open Hugging Face downloader"); h.type = "button"; h.onclick = () => this.openHF();
+    const o = el("button", "mh-btn", "Civitai  (Alt+M)"); o.type = "button"; o.onclick = () => { this.setSource("civitai"); this.open(); };
+    const h = el("button", "mh-btn ghost", "Hugging Face  (Ctrl/Cmd+Shift+B)"); h.type = "button"; h.onclick = () => this.openHF();
     s.append(o, h);
     if (this.active) s.appendChild(el("div", "mh-hint", `${this.active} download${this.active > 1 ? "s" : ""} running…`));
     w.appendChild(s); n.appendChild(w);

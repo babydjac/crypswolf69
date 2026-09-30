@@ -3,11 +3,7 @@ import { api } from "../../scripts/api.js";
 
 const EXTENSION_NAME = "ComfyUI.HFModelDownloader";
 const STYLE_ID = "hfmd-style";
-const BUTTON_ID = "hfmd-sidebar-button";
-const FLOATING_BUTTON_ID = "hfmd-floating-button";
 const OVERLAY_ID = "hfmd-overlay";
-const SIDEBAR_TAB_ID = "hf-model-downloader-sidebar-tab";
-const LAUNCH_SHORTCUT = "Ctrl/Cmd+Shift+B";
 const OWNER_SOURCES_STORAGE_KEY = "hfmd.owner_sources";
 const UI_REFRESH_AGE_MS = 5 * 60 * 1000;
 const ASSET_VERSION = "2.0.0";
@@ -156,6 +152,9 @@ function prettyCategoryName(category) {
 }
 
 function ensureOverlay() {
+    // Built once per page. After the first mount the panel lives inside the Model Hub,
+    // so the old "is the overlay intact?" check below would wrongly rebuild a duplicate.
+    if (state.ui?.modal) return state.ui.overlay;
     const existing = document.getElementById(OVERLAY_ID);
     if (existing) {
         const hasCurrentLayout =
@@ -476,10 +475,11 @@ function ensureOverlay() {
     });
     // Keyboard: the popup handles its own keys and keeps them away from the graph
     // (Delete / Ctrl+A / Space underneath an open dialog is never what you want).
+    // Listeners sit on the panel itself so they keep working once it's mounted in the hub.
     modal.tabIndex = -1;
-    overlay.addEventListener("keydown", onOverlayKeydown);
-    overlay.addEventListener("keyup", (event) => event.stopPropagation());
-    overlay.addEventListener("keypress", (event) => event.stopPropagation());
+    modal.addEventListener("keydown", onOverlayKeydown);
+    modal.addEventListener("keyup", (event) => event.stopPropagation());
+    modal.addEventListener("keypress", (event) => event.stopPropagation());
     closeButton.addEventListener("click", () => closeModal());
     settingsButton.addEventListener("click", async () => {
         const next = !state.settingsOpen;
@@ -587,12 +587,10 @@ function ensureOverlay() {
         if (state.view === "live") startLiveDownload();
         else startDownload();
     });
+    // Esc with focus outside the panel (only matters for the stand-alone fallback overlay;
+    // inside the Model Hub the panel's own handler and the hub take care of it).
     document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && overlay.style.display !== "none") closeModal();
-        if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "b") {
-            event.preventDefault();
-            openModal();
-        }
+        if (event.key === "Escape" && !state.embedded && overlay.style.display !== "none") closeModal();
     });
 
     state.ui = {
@@ -1475,11 +1473,13 @@ async function startDownload() {
     }
 }
 
-function openModal() {
-    ensureStyles();
-    ensureOverlay();
-    state.ui.overlay.style.display = "flex";
-    // Covers a freshly built overlay as well as a rehydrated one.
+// ---------------------------------------------------------------------------
+// Opening / closing. The downloader now lives inside the Model Hub as its
+// "Hugging Face" tab; the stand-alone overlay is only a fallback for when the
+// Model Hub isn't loaded.
+// ---------------------------------------------------------------------------
+
+function activate() {
     applyCompact();
     setView(state.view);
     if (!state.items.length) {
@@ -1497,158 +1497,79 @@ function openModal() {
     }
     // closing the window stops polling but not the download - pick the progress back up
     if (state.jobId) startPolling();
-    // keep keyboard focus inside the popup so graph shortcuts can't fire underneath it
-    requestAnimationFrame(() => {
+    checkAria2();
+    // keep keyboard focus inside the panel so graph shortcuts can't fire underneath it
+    setTimeout(() => {
         const target = state.view === "live" ? state.ui.liveSearch : state.ui.searchInput;
         (target && target.offsetParent ? target : state.ui.modal)?.focus({ preventScroll: true });
-    });
+    }, 30);
 }
 
-function closeModal() {
-    if (!state.ui?.overlay) return;
-    state.ui.overlay.style.display = "none";
+function deactivate() {
     setSettingsOpen(false);
     stopJobsPolling();
     stopPolling();
     renderBottomProgress(null);
 }
 
-function findSidebarHost() {
-    return (
-        document.querySelector(".comfyui-button-group") ||
-        document.querySelector(".comfy-menu .comfyui-button-group") ||
-        document.querySelector(".comfy-menu") ||
-        document.querySelector(".comfyui-menu-right") ||
-        document.querySelector(".comfyui-menu")
-    );
+function mountInto(container, options = {}) {
+    ensureStyles();
+    ensureOverlay();
+    state.embedded = true;
+    state.onClose = typeof options.onClose === "function" ? options.onClose : null;
+    const modal = state.ui.modal;
+    modal.classList.add("hfmd-embedded");
+    if (modal.parentElement !== container) container.appendChild(modal);
+    activate();
 }
 
-function createLaunchButton(className, compact = false) {
-    const button = el("button", className);
-    button.type = "button";
-    button.setAttribute("aria-label", "Open Hugging Face Model Downloader");
-    button.title = "Open Hugging Face Model Downloader";
-    button.innerHTML = compact
-        ? `<span class="hfmd-launch-icon">⬇</span><span class="hfmd-launch-text">Model Browser</span>`
-        : `<span class="hfmd-launch-icon">⬇</span><span class="hfmd-launch-text">HF Models</span>`;
-    button.addEventListener("click", () => openModal());
-    return button;
+function unmount() {
+    if (!state.ui) return;
+    deactivate();
 }
 
-function applyFloatingFallbackStyles(button) {
-    button.style.position = "";
-    button.style.right = "";
-    button.style.bottom = "";
-    button.style.zIndex = "";
-    button.style.border = "";
-    button.style.background = "";
-    button.style.color = "";
-    button.style.borderRadius = "";
-    button.style.padding = "";
-    button.style.fontWeight = "";
-    button.style.display = "";
-    button.style.alignItems = "";
-    button.style.gap = "";
-    button.style.cursor = "";
-}
-
-function ensureFloatingButton() {
-    let floating = document.getElementById(FLOATING_BUTTON_ID);
-    if (!floating) {
-        floating = createLaunchButton("hfmd-floating-button", true);
-        floating.id = FLOATING_BUTTON_ID;
-        document.body.appendChild(floating);
-    }
-    applyFloatingFallbackStyles(floating);
-    return floating;
-}
-
-function ensureSidebarButton(retry = 0) {
-    let button = document.getElementById(BUTTON_ID);
-    if (button) return button;
-    const host = findSidebarHost();
-    if (!host) {
-        ensureFloatingButton();
-        if (retry < 50) setTimeout(() => ensureSidebarButton(retry + 1), 300);
-        return null;
-    }
-
-    button = createLaunchButton("hfmd-sidebar-button");
-    button.id = BUTTON_ID;
-    host.appendChild(button);
-    return button;
-}
-
-function ensureSidebarTab() {
-    if (state.sidebarTabRegistered) return;
-    const manager = app.extensionManager;
-    if (!manager || typeof manager.registerSidebarTab !== "function") return;
-    manager.registerSidebarTab({
-        id: SIDEBAR_TAB_ID,
-        title: "HF Models",
-        icon: "pi pi-download",
-        type: "custom",
-        render: (container) => {
-            container.innerHTML = "";
-            const wrap = el("div", "hfmd-sidebar-tab");
-            wrap.appendChild(el("h3", "hfmd-sidebar-tab-title", "HF Model Browser"));
-            wrap.appendChild(
-                el("p", "hfmd-sidebar-tab-text", "Curated Hugging Face browser with launcher and live install tracking."),
-            );
-            const launch = createLaunchButton("hfmd-sidebar-tab-button", false);
-            launch.querySelector(".hfmd-launch-text").textContent = "Open Model Browser";
-            wrap.appendChild(launch);
-            wrap.appendChild(el("p", "hfmd-sidebar-tab-hint", `Shortcut: ${LAUNCH_SHORTCUT}`));
-            container.appendChild(wrap);
-        },
-    });
-    state.sidebarTabRegistered = true;
-}
-
-function ensureDomObserver() {
-    if (state.domObserver) return;
-    // Observing document.body with subtree:true fires on every canvas repaint and
-    // visibly lags the graph. The launch buttons only ever need re-adding when the
-    // sidebar itself is rebuilt, so watch that host and fall back to a slow poll.
-    const host = findSidebarHost();
-    if (host) {
-        state.domObserver = new MutationObserver(() => {
-            ensureSidebarButton();
-            ensureFloatingButton();
-        });
-        state.domObserver.observe(host, { childList: true });
+function openModal() {
+    // Old entry point, kept for anything that still calls it: open the Model Hub on its
+    // Hugging Face tab.
+    if (window.__modelHub?.openHF) {
+        window.__modelHub.openHF();
         return;
     }
-    state.domObserver = {
-        timer: setInterval(() => {
-            ensureSidebarButton();
-            ensureFloatingButton();
-        }, 4000),
-        disconnect() {
-            clearInterval(this.timer);
-        },
-    };
+    ensureStyles();
+    ensureOverlay();
+    state.embedded = false;
+    const { overlay, modal } = state.ui;
+    modal.classList.remove("hfmd-embedded");
+    if (modal.parentElement !== overlay) overlay.appendChild(modal);
+    overlay.style.display = "flex";
+    activate();
+}
+
+function closeModal() {
+    if (!state.ui) return;
+    if (state.embedded) {
+        // inside the Model Hub: "Close" / Esc close the whole hub (which unmounts us)
+        if (state.onClose) state.onClose();
+        else deactivate();
+        return;
+    }
+    state.ui.overlay.style.display = "none";
+    deactivate();
 }
 
 app.registerExtension({
     name: EXTENSION_NAME,
-    actionBarButtons: [
-        {
-            icon: "icon-[mdi--download-box] size-4",
-            tooltip: "HF Model Downloader",
-            onClick: () => openModal(),
-        },
-    ],
     async setup() {
         ensureStyles();
-        ensureOverlay();
-        ensureFloatingButton();
-        ensureSidebarButton();
-        ensureSidebarTab();
-        ensureDomObserver();
-        checkAria2();
+        // The Model Hub hosts this panel as its "Hugging Face" tab.
+        window.hfModelDownloader = {
+            mount: mountInto,
+            unmount,
+            checkAria2,
+            aria2: () => ({ ...state.aria2 }),
+        };
         window.openHFModelDownloader = openModal;
-        console.log(`[${EXTENSION_NAME}] popup ready. Shortcut: ${LAUNCH_SHORTCUT}`);
+        checkAria2();
     },
 });
 

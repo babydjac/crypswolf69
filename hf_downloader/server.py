@@ -845,19 +845,31 @@ def get_tab_order(items: Sequence[Dict[str, object]]) -> List[str]:
     return ordered + extras
 
 
-_EXTRA_BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/snap/bin")
+_EXTRA_BIN_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/snap/bin"]
+if os.name == "nt":
+    # where winget / Chocolatey / Scoop put executables; a freshly installed tool is
+    # often not on the running process's PATH until ComfyUI restarts
+    for _env, _sub in (("LOCALAPPDATA", r"Microsoft\WinGet\Links"),
+                       ("ProgramData", r"chocolatey\bin"),
+                       ("USERPROFILE", r"scoop\shims")):
+        if os.environ.get(_env):
+            _EXTRA_BIN_DIRS.append(os.path.join(os.environ[_env], _sub))
 
 
 def find_executable(name: str) -> Optional[str]:
-    """shutil.which, plus the usual Homebrew/system dirs - ComfyUI started from a
-    GUI or launchd often has a PATH without /opt/homebrew/bin."""
+    """shutil.which, plus the usual Homebrew/system/Windows package-manager dirs -
+    ComfyUI started from a GUI or launchd often has a PATH without them."""
     found = shutil.which(name)
     if found:
         return found
+    names = [name]
+    if os.name == "nt" and not name.lower().endswith(".exe"):
+        names.append(name + ".exe")
     for directory in _EXTRA_BIN_DIRS:
-        candidate = os.path.join(directory, name)
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
+        for candidate_name in names:
+            candidate = os.path.join(directory, candidate_name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
     return None
 
 
