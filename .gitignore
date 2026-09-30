@@ -21,3 +21,4 @@ node.zip
 
 # Model Hub runtime config (tokens etc.)
 model_hub/config.json
+lora_loader/.cache/

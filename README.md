@@ -57,10 +57,26 @@ Keyboard: `/` search · `Esc` closes the top-most panel · `←` `→` in the vi
 
 Keyboard: `/` search · `↑` `↓` move through repos / files · `→` / `←` jump between repos and files · `Enter` open a repo · `Space` select a file · `Esc` clears the search, then closes the hub.
 
+## ✦ Advanced LoRA Loader
+
+One node for a whole LoRA stack (`CrypsAdvancedLoraLoader`, in *model/loaders*).
+
+- **Rows** — on/off switch, preview, name, strength pill (drag to scrub, click to type, `‹ ›` ±0.05, Shift for ±0.01, Alt-click resets), drag handle to reorder.
+- **Picker** — search by name, trigger word or base model; folder chips, Recent, LoRA Manager favorites; image/video previews; `↑` `↓` `Enter`, Shift adds several.
+- **ⓘ panel** — Civitai page (.com / .red), creator, example images with prompts, file facts (LoRA/LoKr, rank, layers, training steps). Click trigger words to send them to the `trigger_words` output.
+- **CLIP** — optional input; the `T` toggle gives each LoRA its own CLIP strength.
+- **Audio-video models** (LTX-2.3, MiniMax H3) — LoRAs with audio layers get `V×` / `A×` multipliers: audio keys get STR × A×, everything else STR × V×.
+- **Status after a run** — `✓` patched, `◐` partly matched, `⚠` matched nothing (LoRA for another base model), `✖` missing, `↪` found in another loras subfolder (click to save the new path).
+- **Outputs** — `MODEL`, `CLIP`, `trigger_words`, `lora_tags` (`<lora:name:strength>`).
+- `⚡` keeps LoRA files in RAM between runs (capped at 15% of RAM); compact rows and six themes are in the header.
+
+Info comes from LoRA Manager / Civitai Helper / A1111 sidecars when present, otherwise the file is hashed once (off the UI thread) and looked up on Civitai; results are cached in `lora_loader/.cache/`. Missing LoRAs stop the queue with their names, and DaSiWa `stack_data` JSON can be pasted into the `stack` widget.
+
 ## Nodes
 
 - `AlchemistKrea2` / `AlchemistLoraCaption` / `AlchemistH3` / `AlchemistPrompt` / `AlchemistDatasetCaptioner`
 - `PromptRotate` / `PromptRotatePick`
+- `CrypsAdvancedLoraLoader` (✦ ADVANCED LORA LOADER)
 - The Model Hub is a UI panel (no graph nodes)
 
 Existing workflows that used the standalone packs keep the same class names.

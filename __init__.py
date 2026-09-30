@@ -1,4 +1,4 @@
-"""crypswolfy69 nodes — Alchemist, Prompt Rotate, and the Model Hub (Civitai + Hugging Face)."""
+"""crypswolfy69 nodes — Alchemist, Prompt Rotate, Advanced LoRA Loader, and the Model Hub (Civitai + Hugging Face)."""
 
 from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
@@ -14,6 +14,7 @@ from .alchemist.alchemist_node import (
 from . import model_hub as _model_hub  # noqa: F401  (Model Hub: window + Civitai tab)
 from .hf_downloader import live_browse as _hf_browse  # noqa: F401  (Model Hub: Hugging Face tab)
 from .hf_downloader import server as _hf_server  # noqa: F401
+from .lora_loader import CrypsAdvancedLoraLoader
 from .prompt_rotate.prompt_rotate import PromptRotate, PromptRotatePick
 
 _alchemist_routes.register_routes()
@@ -35,6 +36,7 @@ class Crypswolfy69Extension(ComfyExtension):
             AlchemistPrompt,
             PromptRotate,
             PromptRotatePick,
+            CrypsAdvancedLoraLoader,
         ]
 
 
@@ -52,4 +54,5 @@ __all__ = [
     "AlchemistPrompt",
     "PromptRotate",
     "PromptRotatePick",
+    "CrypsAdvancedLoraLoader",
 ]
