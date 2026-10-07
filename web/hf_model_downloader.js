@@ -7,8 +7,77 @@ const OVERLAY_ID = "hfmd-overlay";
 const OWNER_SOURCES_STORAGE_KEY = "hfmd.owner_sources";
 const UI_REFRESH_AGE_MS = 5 * 60 * 1000;
 const ASSET_VERSION = "2.0.0";
-const LAYOUT_VERSION = "v7";
+const LAYOUT_VERSION = "v8";
 const DENSITY_KEY = "hfmd.density";
+// Quickstart bundles: Comfy-Org's repackaged full-precision weights with the text encoders
+// and VAEs each model needs. Files shared between bundles always come from the same repo,
+// so picking two of them downloads the shared encoder once.
+const ZT = "Comfy-Org/z_image_turbo";
+const KREA = "Comfy-Org/Krea-2";
+const H3 = "Comfy-Org/MiniMax-H3";
+const WAN = "Comfy-Org/Wan_2.2_ComfyUI_Repackaged";
+const Z_DEPS = [
+    [ZT, "split_files/text_encoders/qwen_3_4b.safetensors"],
+    [ZT, "split_files/vae/ae.safetensors"],
+];
+const KREA_DEPS = [
+    [KREA, "text_encoders/qwen3vl_4b_bf16.safetensors"],
+    [KREA, "vae/qwen_image_vae.safetensors"],
+];
+const WAN_DEPS = [
+    [WAN, "split_files/text_encoders/umt5_xxl_fp16.safetensors"],
+    [WAN, "split_files/vae/wan_2.1_vae.safetensors"],
+];
+const QUICKSTART = [
+    {
+        name: "Z-Image Turbo",
+        desc: "Fast few-step text to image",
+        files: [[ZT, "split_files/diffusion_models/z_image_turbo_bf16.safetensors"], ...Z_DEPS],
+    },
+    {
+        name: "Z-Image",
+        desc: "Base text to image model",
+        files: [["Comfy-Org/z_image", "split_files/diffusion_models/z_image_bf16.safetensors"], ...Z_DEPS],
+    },
+    {
+        name: "Krea 2 Turbo",
+        desc: "Krea 2 text to image, distilled for few steps",
+        files: [[KREA, "diffusion_models/krea2_turbo_bf16.safetensors"], ...KREA_DEPS],
+    },
+    {
+        name: "Krea 2 Raw",
+        desc: "Krea 2 text to image, undistilled",
+        files: [[KREA, "diffusion_models/krea2_raw_bf16.safetensors"], ...KREA_DEPS],
+    },
+    {
+        name: "MiniMax H3",
+        desc: "Video + audio from first/last frames",
+        files: [
+            [H3, "diffusion_models/minimax_h3_fl2va_bf16.safetensors"],
+            [H3, "text_encoders/qwen3vl_32b_minimax_h3_bf16.safetensors"],
+            [H3, "vae/minimax_h3_video_vae_fp16.safetensors"],
+            [H3, "vae/minimax_h3_audio_vae_fp32.safetensors"],
+        ],
+    },
+    {
+        name: "Wan 2.2 T2V 14B",
+        desc: "Text to video, high + low noise experts",
+        files: [
+            [WAN, "split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors"],
+            [WAN, "split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors"],
+            ...WAN_DEPS,
+        ],
+    },
+    {
+        name: "Wan 2.2 I2V 14B",
+        desc: "Image to video, high + low noise experts",
+        files: [
+            [WAN, "split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors"],
+            [WAN, "split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors"],
+            ...WAN_DEPS,
+        ],
+    },
+];
 
 function readStoredValue(key) {
     try {
@@ -50,6 +119,11 @@ const state = {
         selected: new Set(),
         loading: false,
         debounce: null,
+    },
+    quick: {
+        selected: new Set(),
+        files: new Map(), // "repo::path" -> file row from /repo (size, category, family, installed)
+        loading: false,
     },
     aria2: { installed: true, checked: false },
     settingsOpen: false,
@@ -160,6 +234,7 @@ function ensureOverlay() {
         const hasCurrentLayout =
             existing.dataset.hfmdLayout === LAYOUT_VERSION &&
             existing.querySelector(".hfmd-live") &&
+            existing.querySelector(".hfmd-quickstart") &&
             existing.querySelector(".hfmd-downloads-panel") &&
             existing.querySelector(".hfmd-family-filter") &&
             existing.querySelector(".hfmd-owner-sources") &&
@@ -179,6 +254,11 @@ function ensureOverlay() {
                 browseButton: existing.querySelector(".hfmd-view-browse"),
                 compactButton: existing.querySelector(".hfmd-density-toggle"),
                 liveButton: existing.querySelector(".hfmd-view-live"),
+                quickButton: existing.querySelector(".hfmd-view-quick"),
+                quickPanel: existing.querySelector(".hfmd-quickstart"),
+                quickList: existing.querySelector(".hfmd-quick-list"),
+                quickDownloadButton: existing.querySelector(".hfmd-quick-dl"),
+                quickTotal: existing.querySelector(".hfmd-quick-total"),
                 downloadsButton: existing.querySelector(".hfmd-view-downloads"),
                 refreshButton: existing.querySelector(".hfmd-refresh"),
                 toolbar: existing.querySelector(".hfmd-toolbar"),
@@ -244,6 +324,8 @@ function ensureOverlay() {
     const headerActions = el("div", "hfmd-header-actions");
     const browseButton = el("button", "hfmd-btn hfmd-view-toggle hfmd-view-browse", "Browse");
     const liveButton = el("button", "hfmd-btn hfmd-view-toggle hfmd-view-live", "Live HF");
+    const quickButton = el("button", "hfmd-btn hfmd-view-toggle hfmd-view-quick", "Quickstart");
+    quickButton.title = "One-click bundles: model + text encoder + VAE";
     const downloadsButton = el("button", "hfmd-btn hfmd-view-toggle hfmd-view-downloads", "Downloads");
     const compactButton = el("button", "hfmd-btn hfmd-density-toggle", "Compact");
     const refreshButton = el("button", "hfmd-btn hfmd-refresh", "Refresh Index");
@@ -251,6 +333,7 @@ function ensureOverlay() {
     const closeButton = el("button", "hfmd-btn hfmd-close", "Close");
     headerActions.appendChild(browseButton);
     headerActions.appendChild(liveButton);
+    headerActions.appendChild(quickButton);
     headerActions.appendChild(downloadsButton);
     headerActions.appendChild(compactButton);
     headerActions.appendChild(refreshButton);
@@ -399,6 +482,20 @@ function ensureOverlay() {
     livePanel.appendChild(liveAria2);
     livePanel.appendChild(liveBody);
 
+    const quickPanel = el("div", "hfmd-quickstart");
+    quickPanel.style.display = "none";
+    const quickBar = el("div", "hfmd-live-bar");
+    quickBar.appendChild(
+        el("div", "hfmd-live-hint", "Pick models. Each one brings its text encoder and VAE; files you already have are skipped."),
+    );
+    const quickTotal = el("div", "hfmd-quick-total");
+    const quickDownloadButton = el("button", "hfmd-btn hfmd-live-dl hfmd-quick-dl", "Download");
+    quickBar.appendChild(quickTotal);
+    quickBar.appendChild(quickDownloadButton);
+    const quickList = el("div", "hfmd-live-files hfmd-quick-list");
+    quickPanel.appendChild(quickBar);
+    quickPanel.appendChild(quickList);
+
     const downloadsPanel = el("div", "hfmd-downloads-panel");
     downloadsPanel.style.display = "none";
     const downloadsList = el("div", "hfmd-downloads-list");
@@ -453,6 +550,7 @@ function ensureOverlay() {
     modal.appendChild(tabs);
     modal.appendChild(body);
     modal.appendChild(livePanel);
+    modal.appendChild(quickPanel);
     modal.appendChild(downloadsPanel);
     modal.appendChild(footer);
     overlay.dataset.hfmdLayout = LAYOUT_VERSION;
@@ -523,6 +621,12 @@ function ensureOverlay() {
         runLiveSearch();
     });
     liveAria2Button.addEventListener("click", () => installAria2());
+    quickButton.addEventListener("click", () => {
+        setView("quickstart");
+        checkAria2();
+        loadQuickstart();
+    });
+    quickDownloadButton.addEventListener("click", () => startQuickstartDownload());
     downloadsButton.addEventListener("click", () => {
         setView("downloads");
         fetchJobs();
@@ -585,6 +689,7 @@ function ensureOverlay() {
     });
     downloadButton.addEventListener("click", () => {
         if (state.view === "live") startLiveDownload();
+        else if (state.view === "quickstart") startQuickstartDownload();
         else startDownload();
     });
     // Esc with focus outside the panel (only matters for the stand-alone fallback overlay;
@@ -601,6 +706,7 @@ function ensureOverlay() {
         browseButton,
         compactButton,
         liveButton,
+        quickButton,
         downloadsButton,
         refreshButton,
         toolbar,
@@ -629,6 +735,10 @@ function ensureOverlay() {
         liveAria2,
         liveAria2Text,
         liveAria2Button,
+        quickPanel,
+        quickList,
+        quickDownloadButton,
+        quickTotal,
         downloadsPanel,
         downloadsList,
         selectedInfo,
@@ -872,20 +982,23 @@ function applyCompact() {
 }
 
 function setView(view) {
-    const known = ["browse", "live", "downloads"];
+    const known = ["browse", "live", "quickstart", "downloads"];
     state.view = known.includes(view) ? view : "browse";
     if (!state.ui) return;
     const browse = state.view === "browse";
     const live = state.view === "live";
+    const quick = state.view === "quickstart";
     const downloads = state.view === "downloads";
     state.ui.toolbar.style.display = browse ? "flex" : "none";
     state.ui.tabs.style.display = browse ? "flex" : "none";
     state.ui.body.style.display = browse ? "grid" : "none";
     state.ui.livePanel.style.display = live ? "flex" : "none";
+    state.ui.quickPanel.style.display = quick ? "flex" : "none";
     // flex, not block: the list needs a flex parent to scroll inside.
     state.ui.downloadsPanel.style.display = downloads ? "flex" : "none";
     state.ui.browseButton.classList.toggle("is-active", browse);
     state.ui.liveButton.classList.toggle("is-active", live);
+    state.ui.quickButton.classList.toggle("is-active", quick);
     state.ui.downloadsButton.classList.toggle("is-active", downloads);
     updateSelectionSummary();
     if (downloads) {
@@ -1100,6 +1213,20 @@ function updateSelectionSummary() {
             state.ui.liveDownloadButton.textContent = n ? `Download ${n}` : "Download";
             state.ui.liveDownloadButton.disabled = !n;
         }
+        if (state.ui.downloadButton) state.ui.downloadButton.textContent = label;
+        return;
+    }
+    if (state.view === "quickstart") {
+        const files = quickSelectedFiles();
+        const bytes = files.reduce((sum, f) => sum + Number(f.size || 0), 0);
+        const n = state.quick.selected.size;
+        const label = files.length
+            ? `Download ${files.length} file${files.length === 1 ? "" : "s"} · ${formatBytes(bytes)}`
+            : n ? "Already installed" : "Pick models to download";
+        state.ui.selectedInfo.textContent = `Quickstart: ${n} model(s) selected`;
+        state.ui.quickTotal.textContent = label;
+        state.ui.quickDownloadButton.textContent = files.length ? `Download ${files.length}` : "Download";
+        state.ui.quickDownloadButton.disabled = !files.length;
         if (state.ui.downloadButton) state.ui.downloadButton.textContent = label;
         return;
     }
@@ -1572,6 +1699,155 @@ app.registerExtension({
         checkAria2();
     },
 });
+
+/* ============================================================
+   Quickstart bundles
+   ============================================================ */
+
+const quickKey = ([repo, path]) => `${repo}::${path}`;
+
+// Missing files for the selected bundles, de-duplicated (bundles share encoders and VAEs).
+function quickSelectedFiles() {
+    const out = new Map();
+    for (const preset of QUICKSTART) {
+        if (!state.quick.selected.has(preset.name)) continue;
+        for (const ref of preset.files) {
+            const file = state.quick.files.get(quickKey(ref));
+            if (file && !file.installed) out.set(quickKey(ref), file);
+        }
+    }
+    return [...out.values()];
+}
+
+// Sizes, target folders and "installed" come from the same /repo listing Live view uses,
+// so a file you already have is matched by size and skipped instead of saved twice.
+async function loadQuickstart() {
+    if (state.quick.loading) return;
+    state.quick.loading = true;
+    renderQuickstart();
+    const repos = new Set(QUICKSTART.flatMap((p) => p.files.map(([repo]) => repo)));
+    const failed = [];
+    await Promise.all(
+        [...repos].map(async (repo) => {
+            try {
+                const res = await api.fetchApi(`/hf-model-downloader/repo?id=${encodeURIComponent(repo)}`);
+                const data = await res.json();
+                if (!data.ok) throw new Error(data.error || "repo listing failed");
+                for (const f of data.files) state.quick.files.set(`${repo}::${f.path}`, f);
+            } catch (error) {
+                failed.push(`${repo}: ${error.message || error}`);
+            }
+        }),
+    );
+    state.quick.loading = false;
+    if (failed.length) setStatus(`Quickstart could not list ${failed.join("; ")}`, "error");
+    renderQuickstart();
+}
+
+function renderQuickstart() {
+    const ui = state.ui;
+    if (!ui?.quickList) return;
+    const frag = document.createDocumentFragment();
+    for (const preset of QUICKSTART) {
+        const refs = preset.files;
+        const files = refs.map((ref) => state.quick.files.get(quickKey(ref)));
+        const known = files.filter(Boolean);
+        const allInstalled = known.length === refs.length && known.every((f) => f.installed);
+        const missingBytes = known.filter((f) => !f.installed).reduce((sum, f) => sum + Number(f.size || 0), 0);
+
+        const row = el("div", "hfmd-live-file hfmd-quick-row");
+        row.tabIndex = 0;
+        row.setAttribute("role", "checkbox");
+        row.classList.toggle("is-installed", allInstalled);
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.tabIndex = -1;
+        box.checked = state.quick.selected.has(preset.name);
+        row.classList.toggle("is-selected", box.checked);
+        row.setAttribute("aria-checked", String(box.checked));
+        const toggle = () => {
+            if (state.quick.selected.has(preset.name)) state.quick.selected.delete(preset.name);
+            else state.quick.selected.add(preset.name);
+            renderQuickstart();
+        };
+        row.addEventListener("click", toggle);
+        row.addEventListener("keydown", (event) => {
+            if (event.key !== " " && event.key !== "Enter") return;
+            event.preventDefault();
+            toggle();
+        });
+        row.appendChild(box);
+
+        const main = el("div", "hfmd-live-file-main");
+        const title = el("div", "hfmd-quick-title");
+        title.appendChild(el("span", "hfmd-live-file-name", preset.name));
+        if (allInstalled) title.appendChild(el("span", "hfmd-chip is-green", "installed"));
+        else if (known.length) title.appendChild(el("span", "hfmd-chip is-cyan", formatBytes(missingBytes)));
+        main.appendChild(title);
+        main.appendChild(el("div", "hfmd-live-hint", preset.desc));
+        const sub = el("div", "hfmd-live-file-sub hfmd-quick-files");
+        refs.forEach((ref, i) => {
+            const file = files[i];
+            const line = el("span", "hfmd-quick-file");
+            line.appendChild(el("span", "hfmd-chip", file ? file.category : "…"));
+            line.appendChild(el("span", "", ref[1].split("/").pop()));
+            if (file) line.appendChild(el("span", file.installed ? "hfmd-quick-have" : "", file.installed ? "✓ have it" : formatBytes(file.size)));
+            else if (!state.quick.loading) line.appendChild(el("span", "hfmd-quick-missing", "not found on HF"));
+            sub.appendChild(line);
+        });
+        main.appendChild(sub);
+        row.appendChild(main);
+        frag.appendChild(row);
+    }
+    if (state.quick.loading) frag.prepend(el("div", "hfmd-live-hint", "Checking file sizes and what's already installed…"));
+    ui.quickList.replaceChildren(frag);
+    updateSelectionSummary();
+}
+
+async function startQuickstartDownload() {
+    const files = quickSelectedFiles();
+    if (!files.length) {
+        setStatus(state.quick.selected.size ? "Everything selected is already installed." : "Pick at least one model first.", "warn");
+        return;
+    }
+    if (state.aria2.checked && !state.aria2.installed) {
+        setStatus("aria2c is missing. Install it from the Live HF tab first.", "error");
+        return;
+    }
+    const maxConcurrent = Math.max(1, Math.min(32, Number(state.ui.maxConcurrentInput?.value) || 8));
+    const connections = Math.max(1, Math.min(32, Number(state.ui.connectionsInput?.value) || 16));
+    setStatus(`Queueing ${files.length} quickstart file(s)…`, "info");
+    try {
+        const res = await api.fetchApi("/hf-model-downloader/download", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                max_concurrent_downloads: maxConcurrent,
+                connections_per_download: connections,
+                items: files.map((f) => ({
+                    repo_id: f.repo_id,
+                    repo_revision: f.repo_revision,
+                    path: f.path,
+                    size: f.size,
+                    category: f.category,
+                    family: f.family,
+                    title: f.title,
+                })),
+            }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "download failed");
+        state.jobId = data.job_id;
+        state.quick.selected.clear();
+        setStatus(`Queued ${data.total} file(s).`, "success");
+        setView("downloads");
+        startPolling();
+        startJobsPolling();
+        fetchJobs();
+    } catch (error) {
+        setStatus(`Download failed: ${error.message || error}`, "error");
+    }
+}
 
 /* ============================================================
    Live Hugging Face browser

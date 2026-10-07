@@ -1089,3 +1089,71 @@
 .hfmd-modal.hfmd-embedded .hfmd-footer {
     border-top-width: 1px;
 }
+
+/* ============================================================
+   Quickstart bundles
+   ============================================================ */
+
+.hfmd-quickstart {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+}
+
+.hfmd-quickstart .hfmd-live-bar > .hfmd-live-hint {
+    flex: 1 1 260px;
+}
+
+.hfmd-quick-total {
+    font: 700 12px ui-sans-serif, system-ui;
+    color: var(--hfmd-cyan);
+}
+
+.hfmd-quick-row {
+    align-items: flex-start;
+    padding: 11px 12px;
+    cursor: pointer;
+}
+
+.hfmd-quick-row input[type="checkbox"] {
+    margin-top: 2px;
+}
+
+.hfmd-quick-row.is-selected {
+    border-color: var(--hfmd-violet);
+    box-shadow: var(--hfmd-glow);
+}
+
+.hfmd-quick-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hfmd-quick-title .hfmd-live-file-name {
+    font: 800 13px ui-sans-serif, system-ui;
+}
+
+.hfmd-quick-files {
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 6px;
+}
+
+.hfmd-quick-file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font: 500 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.hfmd-quick-have {
+    color: var(--hfmd-green);
+}
+
+.hfmd-quick-missing {
+    color: var(--hfmd-magenta);
+}
