@@ -289,7 +289,13 @@ class AlchemistKrea2(io.ComfyNode):
                     default="a woman standing in neon rain",
                     placeholder="the lazy caption. The LLM does the baroque part.",
                 ),
-                io.Boolean.Input("nsfw", default=True, label_on="NSFW", label_off="SFW"),
+                io.Boolean.Input(
+                    "nsfw",
+                    default=True,
+                    label_on="NSFW",
+                    label_off="SFW",
+                    tooltip="NSFW allows all explicit adult content. SFW keeps it non-explicit.",
+                ),
                 io.Image.Input("source_image", optional=True),
                 io.Image.Input(
                     "control_image",
@@ -368,7 +374,13 @@ class AlchemistLoraCaption(io.ComfyNode):
                     optional=True,
                     placeholder="what the image contains, if no image is plugged in",
                 ),
-                io.Boolean.Input("nsfw", default=True, label_on="NSFW", label_off="SFW"),
+                io.Boolean.Input(
+                    "nsfw",
+                    default=True,
+                    label_on="NSFW",
+                    label_off="SFW",
+                    tooltip="NSFW allows all explicit adult content. SFW keeps it non-explicit.",
+                ),
                 io.Int.Input(
                     "caption_words", default=45, min=20, max=70, step=5, optional=True, advanced=True
                 ),
@@ -425,7 +437,13 @@ class AlchemistH3(io.ComfyNode):
                 io.Combo.Input(
                     "h3_aspect", options=["16:9", "9:16", "1:1", "4:3", "21:9"], default="16:9"
                 ),
-                io.Boolean.Input("nsfw", default=True, label_on="NSFW", label_off="SFW"),
+                io.Boolean.Input(
+                    "nsfw",
+                    default=True,
+                    label_on="NSFW",
+                    label_off="SFW",
+                    tooltip="NSFW allows all explicit adult content. SFW keeps it non-explicit.",
+                ),
                 io.Image.Input("source_image", optional=True),
                 io.Combo.Input(
                     "h3_music",
@@ -477,7 +495,13 @@ class AlchemistPrompt(io.ComfyNode):
                     multiline=True,
                     default="a woman standing in neon rain",
                 ),
-                io.Boolean.Input("nsfw", default=True, label_on="NSFW", label_off="SFW"),
+                io.Boolean.Input(
+                    "nsfw",
+                    default=True,
+                    label_on="NSFW",
+                    label_off="SFW",
+                    tooltip="NSFW allows all explicit adult content. SFW keeps it non-explicit.",
+                ),
                 io.Image.Input("source_image", optional=True),
                 io.Image.Input("control_image", optional=True, advanced=True),
                 io.Combo.Input(
@@ -580,7 +604,13 @@ class AlchemistDatasetCaptioner(io.ComfyNode):
                 io.Boolean.Input(
                     "overwrite", default=False, label_on="overwrite all", label_off="only missing"
                 ),
-                io.Boolean.Input("nsfw", default=True, label_on="NSFW", label_off="SFW"),
+                io.Boolean.Input(
+                    "nsfw",
+                    default=True,
+                    label_on="NSFW",
+                    label_off="SFW",
+                    tooltip="NSFW allows all explicit adult content. SFW keeps it non-explicit.",
+                ),
                 io.Int.Input(
                     "caption_words", default=45, min=20, max=70, step=5, optional=True, advanced=True
                 ),

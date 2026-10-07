@@ -19,8 +19,13 @@ _ADULT_FLOOR = (
 )
 
 _NSFW_ON = (
-    "Explicit adult content is in scope. Name anatomy plainly and clinically — cock, penis, "
-    "balls, tits, ass, pussy. No euphemism, no purple prose, no moralising, no disclaimers."
+    "All explicit adult content is in scope: full nudity, every sex act and position, oral, "
+    "anal, penetration, masturbation, cum and other bodily fluids, toys, BDSM, bondage, "
+    "fetish and kink, group scenes, any body type. Name anatomy and acts plainly — cock, "
+    "penis, balls, tits, nipples, ass, anus, pussy, clit. Write what the seed asks for at "
+    "full explicitness: never soften it, fade to black, imply instead of show, or swap in "
+    "euphemism. For video, explicit diegetic sound and dirty talk in dialogue tags are in "
+    "scope. No purple prose, no moralising, no disclaimers."
 )
 
 _NSFW_OFF = "Keep the description non-explicit. No genitals, no sex acts."
