@@ -31,7 +31,9 @@ const ICONS = {
   ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   heart: '<path d="M20.8 5.6a5 5 0 0 0-7.1 0L12 7.3l-1.7-1.7a5 5 0 1 0-7.1 7.1L12 21.5l8.8-8.8a5 5 0 0 0 0-7.1z"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
-  comfy: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  grid: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="9" rx="1.5"/><rect x="3" y="15" width="7" height="6" rx="1.5"/><rect x="14" y="15" width="7" height="6" rx="1.5"/>',
+  masonry: '<rect x="3" y="3" width="7" height="11" rx="1.5"/><rect x="14" y="3" width="7" height="6" rx="1.5"/><rect x="3" y="17" width="7" height="4" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/>',
+  list: '<rect x="3" y="4" width="4" height="4" rx="1"/><rect x="3" y="10" width="4" height="4" rx="1"/><rect x="3" y="16" width="4" height="4" rx="1"/><path d="M10 6h11M10 12h11M10 18h11"/>',
   compact: '<rect x="3" y="3" width="4" height="4" rx="1"/><rect x="10" y="3" width="4" height="4" rx="1"/><rect x="17" y="3" width="4" height="4" rx="1"/><rect x="3" y="10" width="4" height="4" rx="1"/><rect x="10" y="10" width="4" height="4" rx="1"/><rect x="17" y="10" width="4" height="4" rx="1"/><rect x="3" y="17" width="4" height="4" rx="1"/><rect x="10" y="17" width="4" height="4" rx="1"/><rect x="17" y="17" width="4" height="4" rx="1"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   left: '<path d="m15 18-6-6 6-6"/>',
@@ -141,13 +143,16 @@ const STYLE = `
 .mh-seg button{width:30px;height:26px;display:flex;align-items:center;justify-content:center;border:0;border-radius:7px;background:transparent;color:var(--dim);cursor:pointer}
 .mh-seg button.on{background:rgba(139,92,246,.22);color:var(--acc2)}
 .mh-body{position:relative;flex:1;min-height:0;overflow-y:auto;padding:14px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.14) transparent}
-.mh-grid{columns:5 236px;column-gap:12px}
-.mh-root.compact .mh-grid{columns:8 160px;column-gap:8px}
-.mh-card,.mh-sk{break-inside:avoid;margin:0 0 12px;border-radius:12px;overflow:hidden;background:var(--surf);border:1px solid var(--line);position:relative;display:block}
-.mh-root.compact .mh-card,.mh-root.compact .mh-sk{margin-bottom:8px;border-radius:10px}
+.mh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.mh-root.v-compact .mh-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.mh-root.v-masonry .mh-grid{display:block;columns:5 236px;column-gap:12px}
+.mh-root.v-list .mh-grid{grid-template-columns:1fr;gap:6px}
+.mh-card,.mh-sk{border-radius:12px;overflow:hidden;background:var(--surf);border:1px solid var(--line);position:relative;display:block}
+.mh-root.v-masonry .mh-card,.mh-root.v-masonry .mh-sk{break-inside:avoid;margin:0 0 12px}
+.mh-root.v-compact .mh-card,.mh-root.v-compact .mh-sk{border-radius:10px}
 .mh-card{cursor:pointer;transition:transform .16s ease,box-shadow .2s,border-color .2s;outline-offset:3px}
 .mh-card:hover{transform:translateY(-2px);border-color:rgba(139,92,246,.6);box-shadow:0 12px 32px rgba(139,92,246,.22)}
-.mh-media{position:relative;width:100%;background:linear-gradient(135deg,#191927,#231a2b);overflow:hidden}
+.mh-media{position:relative;width:100%;aspect-ratio:4/5;background:linear-gradient(135deg,#191927,#231a2b);overflow:hidden}
 .mh-media img,.mh-media video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .mh-media img{opacity:0;transition:opacity .35s ease}
 .mh-media.ready img{opacity:1}
@@ -175,11 +180,28 @@ const STYLE = `
 .mh-sub span{display:inline-flex;align-items:center;gap:3px}
 .mh-pill{font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:5px;background:rgba(139,92,246,.18);color:#c4b5fd}
 .mh-pill.g{background:rgba(255,255,255,.07);color:var(--mut)}
-.mh-root.compact .mh-by,.mh-root.compact .mh-sub{display:none}
-.mh-root.compact .mh-meta{padding:6px 8px 7px}
-.mh-root.compact .mh-name{font-size:11px;-webkit-line-clamp:1}
-.mh-root.compact .mh-quick{padding:5px 7px}
-.mh-sk{height:var(--h);background:var(--surf)}
+.mh-root .mh-ltype,.mh-root .mh-lget{display:none}
+.mh-root.v-masonry .mh-media{aspect-ratio:var(--ar)}
+.mh-root.v-compact .mh-by,.mh-root.v-compact .mh-sub{display:none}
+.mh-root.v-compact .mh-meta{padding:6px 8px 7px}
+.mh-root.v-compact .mh-name{font-size:11px;-webkit-line-clamp:1}
+.mh-root.v-compact .mh-quick{padding:5px 7px}
+.mh-root.v-list .mh-card{display:flex;align-items:center;gap:14px;padding:6px 12px 6px 6px;border-radius:10px}
+.mh-root.v-list .mh-card:hover{transform:none;box-shadow:none;background:var(--surf2)}
+.mh-root.v-list .mh-media{flex:none;width:64px;aspect-ratio:1;border-radius:8px}
+.mh-root.v-list .mh-badge,.mh-root.v-list .mh-quick,.mh-root.v-list .mh-vid,.mh-root.v-list .mh-nsfwtag{display:none}
+.mh-root.v-list .mh-owned,.mh-root.v-list .mh-prog{top:3px;right:3px;padding:2px 4px;font-size:8.5px}
+.mh-root.v-list .mh-owned span{display:none}
+.mh-root.v-list .mh-meta{flex:1;min-width:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name sub" "by sub";column-gap:18px;align-items:center}
+.mh-root.v-list .mh-name{grid-area:name;font-size:13px;-webkit-line-clamp:1;margin:0}
+.mh-root.v-list .mh-by{grid-area:by;margin:2px 0 0}
+.mh-root.v-list .mh-sub{grid-area:sub;flex-wrap:nowrap;gap:12px;font-size:11.5px}
+.mh-root.v-list .mh-ltype{display:inline-flex}
+.mh-root.v-list .mh-lget{display:inline-flex;flex:none;min-width:96px}
+.mh-sk{aspect-ratio:4/6;background:var(--surf)}
+.mh-root.v-masonry .mh-sk{aspect-ratio:auto;height:var(--h)}
+.mh-root.v-compact .mh-sk{aspect-ratio:4/5.6}
+.mh-root.v-list .mh-sk{aspect-ratio:auto;height:78px}
 .mh-sk::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 20%,rgba(255,255,255,.05) 50%,transparent 80%);animation:mhSh 1.2s infinite}
 @keyframes mhSh{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
 .mh-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:70px 20px;color:var(--mut);font-size:13.5px;text-align:center}
@@ -326,6 +348,8 @@ const STYLE = `
 @media (prefers-reduced-motion:reduce){.mh-root *{animation:none!important;transition:none!important}}
 `;
 
+const VIEWS = [["grid", "Grid"], ["masonry", "Masonry"], ["compact", "Compact grid"], ["list", "List"]];
+
 // HF categories used by the fallback browser
 const HF_CATS = [
   { label: "All", q: "" }, { label: "Diffusion", q: "diffusion gguf", target: "diffusion_models" },
@@ -340,8 +364,10 @@ class ModelHub {
     const p = loadPrefs();
     this.prefs = {
       source: "civitai", types: "", base: "", sort: "Highest Rated", period: "AllTime",
-      nsfw: false, density: "comfy", ...p,
+      nsfw: false, view: p.density === "compact" ? "compact" : "grid", ...p,
     };
+    delete this.prefs.density;
+    if (!VIEWS.some(([k]) => k === this.prefs.view)) this.prefs.view = "grid";
     if (!["civitai", "huggingface", "hf-fallback"].includes(this.prefs.source)) this.prefs.source = "civitai";
     this.aria2 = null; this._ariaBusy = false; this._hfMounted = false;
     this.q = "";
@@ -384,7 +410,7 @@ class ModelHub {
     document.body.appendChild(L);
     this.launch = L;
 
-    this.root = el("div", "mh-root" + (this.prefs.density === "compact" ? " compact" : ""));
+    this.root = el("div", "mh-root v-" + this.prefs.view);
     this.overlay = el("div", "mh-overlay");
     this.overlay.addEventListener("mousedown", (e) => { if (e.target === this.overlay) this.close(); });
     const panel = el("div", "mh-panel"); panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "Model Hub");
@@ -645,11 +671,14 @@ class ModelHub {
     f.appendChild(Object.assign(el("div"), { style: "flex:1" }));
     this.countEl = el("span", "mh-count"); f.appendChild(this.countEl); this._updCount();
 
-    const seg = el("div", "mh-seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "Card size");
-    [["comfy", "Comfortable"], ["compact", "Compact"]].forEach(([k, t]) => {
-      const b = el("button", this.prefs.density === k ? "on" : ""); b.type = "button"; b.title = t; b.setAttribute("aria-label", t);
+    const seg = el("div", "mh-seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "Layout");
+    VIEWS.forEach(([k, t]) => {
+      const b = el("button", this.prefs.view === k ? "on" : ""); b.type = "button"; b.title = t; b.setAttribute("aria-label", t);
       b.appendChild(icon(k, 15));
-      b.onclick = () => { this.prefs.density = k; this._save(); this.root.classList.toggle("compact", k === "compact"); this._renderFilters(); };
+      b.onclick = () => {
+        this.root.classList.replace("v-" + this.prefs.view, "v-" + k);
+        this.prefs.view = k; this._save(); this._renderFilters();
+      };
       seg.appendChild(b);
     });
     const paste = el("button", "mh-chip"); paste.type = "button"; paste.append(icon("link", 14), el("span", null, "Paste link"));
@@ -680,7 +709,7 @@ class ModelHub {
     if (this.prefs.source === "hf-fallback") { this._hfLoad(); return; }
     this.grid.style.display = "";
     [270, 200, 320, 240, 290, 210, 260, 330, 200, 250, 300, 230].forEach((h) => {
-      const s = el("div", "mh-sk"); s.style.setProperty("--h", (this.prefs.density === "compact" ? h * 0.7 : h) + "px"); this.grid.appendChild(s);
+      const s = el("div", "mh-sk"); s.style.setProperty("--h", h + "px"); this.grid.appendChild(s);
     });
     this.load(true);
   }
@@ -738,7 +767,7 @@ class ModelHub {
   _media(md, { autoplayHover = true, blur = false } = {}) {
     const box = el("div", "mh-media");
     const ratio = md && md.w && md.h ? Math.min(1.9, Math.max(0.55, md.h / md.w)) : 1.3;
-    box.style.aspectRatio = `1 / ${ratio}`;
+    box.style.setProperty("--ar", `1 / ${ratio}`);
     if (!md) { box.classList.add("ready"); const n = el("div", "mh-noimg"); n.append(icon("folder", 22), el("span", null, "No preview")); box.appendChild(n); return box; }
     const img = el("img"); img.loading = "lazy"; img.decoding = "async"; img.alt = "";
     // Civitai renders resized previews on first request, so a cold one can take a few
@@ -778,23 +807,27 @@ class ModelHub {
     media.appendChild(el("div", "mh-badge", m.type || "model"));
     const status = el("div"); media.appendChild(status);
     const cbar = el("div", "mh-cbar"); const ci = el("i"); cbar.appendChild(ci); cbar.style.display = "none"; media.appendChild(cbar);
-    if (f0) {
-      const q = el("button", "mh-quick"); q.type = "button"; q.title = `Download ${f0.name}`;
+    // grid views show the download button over the preview; list view puts it at the row's end
+    const getBtn = (cls) => {
+      const q = el("button", cls); q.type = "button"; q.title = `Download ${f0.name}`;
       q.append(icon("download", 13), el("span", null, f0.sizeKB ? fmtBytes(f0.sizeKB * 1024) : "Get"));
       q.onclick = (e) => { e.stopPropagation(); this.download(this._fileOpts(m, v0, f0)); };
-      media.appendChild(q);
-    }
+      return q;
+    };
+    if (f0) media.appendChild(getBtn("mh-quick"));
     c.appendChild(media);
 
     const meta = el("div", "mh-meta");
     meta.appendChild(el("div", "mh-name", m.name || "Untitled"));
     if (m.creator) meta.appendChild(el("div", "mh-by", "by " + m.creator));
     const sub = el("div", "mh-sub");
+    sub.appendChild(el("span", "mh-pill g mh-ltype", m.type || "model"));
     const d = el("span"); d.append(icon("download", 11), el("span", null, fmtNum(m.downloads))); sub.appendChild(d);
     const l = el("span"); l.append(icon("heart", 11), el("span", null, fmtNum(m.likes))); sub.appendChild(l);
     if (v0.baseModel) sub.appendChild(el("span", "mh-pill", v0.baseModel));
     meta.appendChild(sub);
     c.appendChild(meta);
+    if (f0) c.appendChild(getBtn("mh-btn ghost mh-lget"));
 
     const names = [];
     (m.versions || []).forEach((v) => (v.files || []).forEach((f) => f.name && names.push(f.name.toLowerCase())));
